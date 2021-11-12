@@ -127,7 +127,7 @@ class _DynamicGRU_GPU(_DynamicRNNBase):
         mode = 'GRU'
         super().__init__(mode)
 
-class _DynamicLSTM_GPU(nn.Cell):
+class _DynamicLSTM_GPU(_DynamicRNNBase):
     def __init__(self):
         mode = 'LSTM'
         super().__init__(mode)
@@ -172,7 +172,7 @@ class _DynamicLSTM_Ascend(nn.Cell):
             c = c[-1]
         return outputs, (h, c)
 
-class RNNBase(nn.Cell):
+class _RNNBase(nn.Cell):
     '''Basic class for RNN operators'''
     def __init__(self, mode, input_size, hidden_size, num_layers=1, has_bias=True,
                  batch_first=False, dropout=0, bidirectional=False):
@@ -342,7 +342,7 @@ class RNNBase(nn.Cell):
             x = P.Transpose()(x, (1, 0, 2))
         return x, h
 
-class RNN(RNNBase):
+class RNN(_RNNBase):
     '''RNN operator class'''
     def __init__(self, *args, **kwargs):
         if 'nonlinearity' in kwargs:
@@ -359,13 +359,13 @@ class RNN(RNNBase):
 
         super(RNN, self).__init__(mode, *args, **kwargs)
 
-class GRU(RNNBase):
+class GRU(_RNNBase):
     '''GRU operator class'''
     def __init__(self, *args, **kwargs):
         mode = 'GRU'
         super(GRU, self).__init__(mode, *args, **kwargs)
 
-class LSTM(RNNBase):
+class LSTM(_RNNBase):
     '''LSTM operator class'''
     def __init__(self, *args, **kwargs):
         mode = 'LSTM'
