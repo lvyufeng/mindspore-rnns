@@ -135,15 +135,18 @@ class _DynamicLSTM_GPU(_DynamicRNNBase):
 class _DynamicGRU_Ascend(nn.Cell):
     def __init__(self):
         super().__init__()
-        self.gru = P.DynamicGRUV2()
+        self.gru = P.DynamicGRUV2(gate_order='rzh')
+        self.transpose = P.Transpose()
+        self.dtype = mstype.float16
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        outputs, _, _, _, _, _ = self.gru(x, \
+        print(x.shape, h_0.shape, seq_length, w_ih.shape, w_hh.shape, b_ih.shape, b_hh.shape)
+        outputs, _, _, _, _, _ = self.gru(self.cast(x, self.dtype), \
                                          self.cast(self.transpose(w_ih, (1, 0)), self.dtype), \
                                          self.cast(self.transpose(w_hh, (1, 0)), self.dtype), \
                                          self.cast(b_ih, self.dtype), \
                                          self.cast(b_hh, self.dtype), \
-                                         None, h_0)
+                                         None, self.cast(h_0, self.dtype))
         if seq_length is not None:
             h = get_hidden(outputs, seq_length)
             mask = sequence_mask(seq_length, x.shape[0])

@@ -127,4 +127,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+kernel_meta/
 analyze_fail.dat
