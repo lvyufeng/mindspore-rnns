@@ -8,7 +8,6 @@ class TestRNN(unittest.TestCase):
     def setUp(self):
         self.input_size, self.hidden_size = 16, 32
         self.x = np.random.randn(3, 10, self.input_size)
-        context.set_context(mode=context.PYNATIVE_MODE)
 
     def test_rnn(self):
         rnn = GRU(self.input_size, self.hidden_size, batch_first=True)

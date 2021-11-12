@@ -140,7 +140,6 @@ class _DynamicGRU_Ascend(nn.Cell):
         self.dtype = mstype.float16
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        print(x.shape, h_0.shape, seq_length, w_ih.shape, w_hh.shape, b_ih.shape, b_hh.shape)
         outputs, _, _, _, _, _ = self.gru(self.cast(x, self.dtype), \
                                          self.cast(self.transpose(w_ih, (1, 0)), self.dtype), \
                                          self.cast(self.transpose(w_hh, (1, 0)), self.dtype), \
@@ -159,12 +158,19 @@ class _DynamicLSTM_Ascend(nn.Cell):
     def __init__(self):
         super().__init__()
         self.lstm = P.DynamicRNN()
-        self.concat = P.Concat()
+        self.concat = P.Concat(axis=1)
+        self.transpose = P.Transpose()
+        self.cast = P.Cast()
+        self.dtype = mstype.float16
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
         weight = self.concat((w_ih, w_hh))
         bias = b_ih + b_hh
-        outputs, h, c, _, _, _, _, _ = self.lstm(x, weight, bias, None, h_0[0], h_0[1])
+        outputs, h, c, _, _, _, _, _ = self.lstm(self.cast(x, self.dtype), \
+                                                 self.cast(self.transpose(weight, (1, 0)), self.dtype), \
+                                                 self.cast(bias, self.dtype), None, \
+                                                 self.cast(h_0[0].view(1, *h_0[0].shape), self.dtype), \
+                                                 self.cast(h_0[1].view(1, *h_0[1].shape), self.dtype))
         if seq_length is not None:
             h = get_hidden(h, seq_length)
             c = get_hidden(c, seq_length)
