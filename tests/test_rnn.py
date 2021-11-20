@@ -96,6 +96,4 @@ class TestRNN(unittest.TestCase):
         rnn_pt_grads = [param.grad for param in rnn_pt.parameters()]
         
         for ms_grad, pt_grad in zip(rnn_ms_grads, rnn_pt_grads):
-            print(ms_grad.shape)
-            print(pt_grad.shape)
             assert np.allclose(ms_grad.asnumpy(), pt_grad.detach().numpy(), 1e-4, 1e-4)
