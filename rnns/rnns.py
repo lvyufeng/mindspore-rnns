@@ -127,11 +127,6 @@ class _DynamicGRU_GPU(_DynamicRNNBase):
         mode = 'GRU'
         super().__init__(mode)
 
-class _DynamicLSTM_GPU(_DynamicRNNBase):
-    def __init__(self):
-        mode = 'LSTM'
-        super().__init__(mode)
-
 class _DynamicGRU_Ascend(nn.Cell):
     def __init__(self):
         super().__init__()
@@ -153,6 +148,31 @@ class _DynamicGRU_Ascend(nn.Cell):
         else:
             h = outputs[-1]
         return outputs, h
+
+class _DynamicLSTM_GPU(nn.Cell):
+    def __init__(self):
+        super().__init__()
+        self.concat = P.Concat()
+
+    def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
+        gate_size, input_size = w_ih.shape
+        hidden_size = gate_size // 4
+        weights = self.concat((
+            w_ih.view(-1, 1, 1),
+            w_hh.view(-1, 1, 1),
+            b_ih.view(-1, 1, 1),
+            b_hh.view(-1, 1, 1)
+        ))
+        if seq_length is None:
+            output, h_n, c_n, _, _ = P.LSTM(input_size, hidden_size, 1, True, False, 0.0)(
+                x,
+                h_0[0].view(1, *h_0[0].shape),
+                h_0[1].view(1, *h_0[1].shape),
+                weights
+            )
+        else:
+            output, (h_n, c_n) = _DynamicRNNBase('LSTM')(x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh)
+        return output, (h_n, c_n)
 
 class _DynamicLSTM_Ascend(nn.Cell):
     def __init__(self):
