@@ -135,6 +135,9 @@ class _DynamicGRU_Ascend(nn.Cell):
         self.dtype = mstype.float16
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
+        if b_ih is None:
+            b_ih = P.Zeros()(w_ih.shape[0], w_ih.dtype)
+            b_hh = P.Zeros()(w_ih.shape[0], w_ih.dtype)
         outputs, _, _, _, _, _ = self.gru(self.cast(x, self.dtype), \
                                          self.cast(self.transpose(w_ih, (1, 0)), self.dtype), \
                                          self.cast(self.transpose(w_hh, (1, 0)), self.dtype), \
@@ -157,14 +160,22 @@ class _DynamicLSTM_GPU(nn.Cell):
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
         gate_size, input_size = w_ih.shape
         hidden_size = gate_size // 4
-        weights = self.concat((
-            w_ih.view(-1, 1, 1),
-            w_hh.view(-1, 1, 1),
-            b_ih.view(-1, 1, 1),
-            b_hh.view(-1, 1, 1)
-        ))
         if seq_length is None:
-            output, h_n, c_n, _, _ = P.LSTM(input_size, hidden_size, 1, True, False, 0.0)(
+            if b_ih is None:
+                weights = self.concat((
+                    w_ih.view(-1, 1, 1),
+                    w_hh.view(-1, 1, 1)
+                ))
+                has_bias = False
+            else:
+                weights = self.concat((
+                    w_ih.view(-1, 1, 1),
+                    w_hh.view(-1, 1, 1),
+                    b_ih.view(-1, 1, 1),
+                    b_hh.view(-1, 1, 1)
+                ))
+                has_bias = True
+            output, h_n, c_n, _, _ = P.LSTM(input_size, hidden_size, 1, has_bias, False, 0.0)(
                 x,
                 h_0[0].view(1, *h_0[0].shape),
                 h_0[1].view(1, *h_0[1].shape),
@@ -178,14 +189,29 @@ class _DynamicLSTM_Ascend(nn.Cell):
     def __init__(self):
         super().__init__()
         self.lstm = P.DynamicRNN()
-        self.concat = P.Concat(axis=1)
+        self.concat_dim1 = P.Concat(axis=1)
+        self.concat_dim0 = P.Concat(axis=0)
         self.transpose = P.Transpose()
         self.cast = P.Cast()
+        self.split = P.Split(axis=0, output_num=4)
         self.dtype = mstype.float16
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        weight = self.concat((w_ih, w_hh))
-        bias = b_ih + b_hh
+        w_ih_i, w_ih_f, w_ih_g, w_ih_o = self.split(w_ih)
+        w_hh_i, w_hh_f, w_hh_g, w_hh_o = self.split(w_hh)
+        w_ih = self.concat_dim0((w_ih_i, w_ih_g, w_ih_f, w_ih_o))
+        w_hh = self.concat_dim0((w_hh_i, w_hh_g, w_hh_f, w_hh_o))
+        weight = self.concat_dim1((w_ih, w_hh))
+        if b_ih is None:
+            bias = P.Zeros()(w_ih.shape[0], w_ih.dtype)
+        else:
+            b_ih_i, b_ih_f, b_ih_g, b_ih_o = self.split(b_ih)
+            b_hh_i, b_hh_f, b_hh_g, b_hh_o = self.split(b_hh)
+            bias = self.concat_dim0((b_ih_i + b_hh_i, \
+                                     b_ih_g + b_hh_g, \
+                                     b_ih_f + b_hh_f, \
+                                     b_ih_o + b_hh_o))
+
         outputs, h, c, _, _, _, _, _ = self.lstm(self.cast(x, self.dtype), \
                                                  self.cast(self.transpose(weight, (1, 0)), self.dtype), \
                                                  self.cast(bias, self.dtype), None, \

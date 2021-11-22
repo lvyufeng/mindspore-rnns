@@ -2,16 +2,16 @@ import unittest
 import mindspore
 import numpy as np
 import mindspore.ops as ops
-from mindspore import Tensor
+from mindspore import Tensor, context
 from rnns import LSTM
 import torch
 
-class TestRNN(unittest.TestCase):
+class TestLSTM(unittest.TestCase):
     def setUp(self):
         self.input_size, self.hidden_size = 16, 32
         self.x = np.random.randn(3, 10, self.input_size)
 
-    def test_rnn(self):
+    def test_lstm(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
         output, (h, c) = rnn(inputs)
@@ -20,7 +20,7 @@ class TestRNN(unittest.TestCase):
         assert h.shape == (1, 3, self.hidden_size)
         assert c.shape == (1, 3, self.hidden_size)
 
-    def test_rnn_bidirection(self):
+    def test_lstm_bidirection(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True, bidirectional=True)
         inputs = Tensor(self.x, mindspore.float32)
         output, (h, c) = rnn(inputs)
@@ -29,7 +29,7 @@ class TestRNN(unittest.TestCase):
         assert h.shape == (2, 3, self.hidden_size)
         assert c.shape == (2, 3, self.hidden_size)
 
-    def test_rnn_multi_layer(self):
+    def test_lstm_multi_layer(self):
         rnn = LSTM(self.input_size, self.hidden_size, num_layers=3, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
         output, (h, c) = rnn(inputs)
@@ -60,7 +60,11 @@ class TestRNN(unittest.TestCase):
         # forward
         outputs_ms, (h_ms, c_ms) = rnn_ms(inputs_ms)
         outputs_pt, (h_pt, c_pt) = rnn_pt(inputs_pt)
-
+        print(h_ms.shape, h_pt.shape)
+        # print(h_ms, h_pt)
+        print(outputs_ms, outputs_pt)
+        print(h_ms, h_pt)
+        print(c_ms, c_pt)
         assert np.allclose(outputs_ms.asnumpy(), outputs_pt.detach().numpy(), 1e-3, 1e-3)
         assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-3, 1e-3)
         assert np.allclose(c_ms.asnumpy(), c_pt.detach().numpy(), 1e-3, 1e-3)
