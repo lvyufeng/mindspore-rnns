@@ -10,6 +10,7 @@ from mindspore import Tensor, Parameter, ParameterTuple
 from mindspore import log as logger
 from mindspore import context
 from .rnn_cells import rnn_relu_cell, rnn_tanh_cell, gru_cell, lstm_cell
+from .rnn_utils import Reverse, ReverseSequence
 
 @constexpr
 def _init_state(shape, dtype, is_lstm):
@@ -152,38 +153,10 @@ class _DynamicGRU_Ascend(nn.Cell):
             h = outputs[-1]
         return outputs, h
 
-class _DynamicLSTM_GPU(nn.Cell):
+class _DynamicLSTM_GPU(_DynamicRNNBase):
     def __init__(self):
-        super().__init__()
-        self.concat = P.Concat()
-
-    def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        gate_size, input_size = w_ih.shape
-        hidden_size = gate_size // 4
-        if seq_length is None:
-            if b_ih is None:
-                weights = self.concat((
-                    w_ih.view(-1, 1, 1),
-                    w_hh.view(-1, 1, 1)
-                ))
-                has_bias = False
-            else:
-                weights = self.concat((
-                    w_ih.view(-1, 1, 1),
-                    w_hh.view(-1, 1, 1),
-                    b_ih.view(-1, 1, 1),
-                    b_hh.view(-1, 1, 1)
-                ))
-                has_bias = True
-            output, h_n, c_n, _, _ = P.LSTM(input_size, hidden_size, 1, has_bias, False, 0.0)(
-                x,
-                h_0[0].view(1, *h_0[0].shape),
-                h_0[1].view(1, *h_0[1].shape),
-                weights
-            )
-        else:
-            output, (h_n, c_n) = _DynamicRNNBase('LSTM')(x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh)
-        return output, (h_n, c_n)
+        mode = 'LSTM'
+        super().__init__(mode)
 
 class _DynamicLSTM_Ascend(nn.Cell):
     def __init__(self):
@@ -258,8 +231,12 @@ class _RNNBase(nn.Cell):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        self.reverse = P.ReverseV2([0])
-        self.reverse_sequence = P.ReverseSequence(0, 1)
+        if context.get_context("device_target") == "CPU":
+            self.reverse = Reverse(0)
+            self.reverse_sequence = ReverseSequence(0, 1)
+        else:
+            self.reverse = P.ReverseV2([0])
+            self.reverse_sequence = P.ReverseSequence(0, 1)
         self.hidden_size = hidden_size
         self.batch_first = batch_first
         self.num_layers = num_layers
