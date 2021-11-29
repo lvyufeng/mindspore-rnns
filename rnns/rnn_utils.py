@@ -2,7 +2,7 @@
 import mindspore
 import mindspore.nn as nn
 import mindspore.ops as ops
-import mindspore.numpy as np
+import mindspore.numpy as mnp
 
 class Reverse(nn.Cell):
     """Reverse operator, like Reverse in mindspore"""
@@ -12,7 +12,7 @@ class Reverse(nn.Cell):
 
     def construct(self, input_x):
         dim_size = input_x.shape[self.dim]
-        reversed_indexes = np.arange(dim_size-1, -1, -1)
+        reversed_indexes = mnp.arange(dim_size-1, -1, -1)
         output = ops.Gather()(input_x, reversed_indexes, self.dim)
         return output
 

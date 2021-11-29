@@ -123,7 +123,7 @@ class _DynamicRNN_Tanh(_DynamicRNNBase):
         mode = 'RNN_TANH'
         super().__init__(mode)
 
-class _DynamicGRU_GPU(_DynamicRNNBase):
+class _DynamicGRU_CPU_GPU(_DynamicRNNBase):
     def __init__(self):
         mode = 'GRU'
         super().__init__(mode)
@@ -153,7 +153,7 @@ class _DynamicGRU_Ascend(nn.Cell):
             h = outputs[-1]
         return outputs, h
 
-class _DynamicLSTM_GPU(_DynamicRNNBase):
+class _DynamicLSTM_CPU_GPU(_DynamicRNNBase):
     def __init__(self):
         mode = 'LSTM'
         super().__init__(mode)
@@ -218,10 +218,10 @@ class _RNNBase(nn.Cell):
                            "num_layers={}".format(dropout, num_layers))
         if mode == "LSTM":
             gate_size = 4 * hidden_size
-            self.rnn = _DynamicLSTM_Ascend() if is_ascend else _DynamicLSTM_GPU()
+            self.rnn = _DynamicLSTM_Ascend() if is_ascend else _DynamicLSTM_CPU_GPU()
         elif mode == "GRU":
             gate_size = 3 * hidden_size
-            self.rnn = _DynamicGRU_Ascend() if is_ascend else _DynamicGRU_GPU()
+            self.rnn = _DynamicGRU_Ascend() if is_ascend else _DynamicGRU_CPU_GPU()
         elif mode == "RNN_TANH":
             gate_size = hidden_size
             self.rnn = _DynamicRNN_Tanh()
@@ -375,7 +375,69 @@ class _RNNBase(nn.Cell):
         return x, h
 
 class RNN(_RNNBase):
-    '''RNN operator class'''
+    r"""
+    Stacked Elman RNN layers.
+
+    Apply RNN layer with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to the input.
+
+    For each element in the input sequence, each layer computes the following function:
+
+    .. math::
+        h_t = \tanh(W_{ih} x_t + b_{ih} + W_{hh} h_{(t-1)} + b_{hh})
+
+    Here :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
+    the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
+    previous layer at time `t-1` or the initial hidden state at time `0`.
+    If :attr:`nonlinearity` is ``'relu'``, then :math:`\text{ReLU}` is used instead of :math:`\tanh`.
+
+    Args:
+        input_size (int): Number of features of input.
+        hidden_size (int):  Number of features of hidden layer.
+        num_layers (int): Number of layers of stacked RNN. Default: 1.
+        nonlinearity (str): The non-linearity to use. Can be either ``'tanh'`` or ``'relu'``. Default: ``'tanh'``
+        has_bias (bool): Whether the cell has bias `b_ih` and `b_hh`. Default: True.
+        batch_first (bool): Specifies whether the first dimension of input `x` is batch_size. Default: False.
+        dropout (float): If not 0.0, append `Dropout` layer on the outputs of each
+            RNN layer except the last layer. Default 0.0. The range of dropout is [0.0, 1.0).
+        bidirectional (bool): Specifies whether it is a bidirectional RNN,
+            num_directions=2 if bidirectional=True otherwise 1. Default: False.
+
+    Inputs:
+        - **x** (Tensor) - Tensor of data type mindspore.float32 and
+          shape (seq_len, batch_size, `input_size`) or (batch_size, seq_len, `input_size`).
+        - **hx** (Tensor) - Tensor of data type mindspore.float32 and
+          shape (num_directions * `num_layers`, batch_size, `hidden_size`). Data type of `hx` must be the same as `x`.
+        - **seq_length** (Tensor) - The length of each sequence in a input batch.
+          Tensor of shape :math:`(\text{batch_size})`. Default: None.
+          This input indicates the real sequence length before padding to avoid padded elements
+          have been used to compute hidden state and affect the final output. It is recommend to
+          use this input when **x** has padding elements.
+
+    Outputs:
+        Tuple, a tuple contains (`output`, `h_n`).
+
+        - **output** (Tensor) - Tensor of shape (seq_len, batch_size, num_directions * `hidden_size`) or
+          (batch_size, seq_len, num_directions * `hidden_size`).
+        - **hx_n** (Tensor) - Tensor of shape (num_directions * `num_layers`, batch_size, `hidden_size`).
+
+    Raises:
+        TypeError: If `input_size`, `hidden_size` or `num_layers` is not an int.
+        TypeError: If `has_bias`, `batch_first` or `bidirectional` is not a bool.
+        TypeError: If `dropout` is neither a float nor an int.
+        ValueError: If `dropout` is not in range [0.0, 1.0).
+        ValueError: If `nonlinearity` is not in ['tanh', 'relu'].
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
+    Examples:
+        >>> net = nn.RNN(10, 16, 2, has_bias=True, batch_first=True, bidirectional=False)
+        >>> x = Tensor(np.ones([3, 5, 10]).astype(np.float32))
+        >>> h0 = Tensor(np.ones([1 * 2, 3, 16]).astype(np.float32))
+        >>> output, hn = net(x, h0)
+        >>> print(output.shape)
+        (3, 5, 16)
+    """
     def __init__(self, *args, **kwargs):
         if 'nonlinearity' in kwargs:
             if kwargs['nonlinearity'] == 'tanh':
@@ -392,13 +454,169 @@ class RNN(_RNNBase):
         super(RNN, self).__init__(mode, *args, **kwargs)
 
 class GRU(_RNNBase):
-    '''GRU operator class'''
+    r"""
+    Stacked GRU (Gated Recurrent Unit) layers.
+
+    Apply GRU layer to the input.
+
+    There are two gates in a GRU model; one is update gate and the other is reset gate.
+    Denote two consecutive time nodes as :math:`t-1` and :math:`t`.
+    Given an input :math:`x_t` at time :math:`t`, an hidden state :math:`h_{t-1}`, the update and reset gate at
+    time :math:`t` is computed using an gating mechanism. Update gate :math:`z_t` is designed to protect the cell
+    from perturbation by irrelevant inputs and past hidden state. Reset gate :math:`r_t` determines how much
+    information should be reset from old hidden state. New memory state :math:`{n}_t` is
+    calculated with the current input, on which the reset gate will be applied. Finally, current hidden state
+    :math:`h_{t}` is computed with the calculated update grate and new memory state. The complete
+    formulation is as follows.
+
+    .. math::
+        \begin{array}{ll}
+            r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
+            z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
+            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
+            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
+        \end{array}
+
+    Here :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product. :math:`W, b`
+    are learnable weights between the output and the input in the formula. For instance,
+    :math:`W_{ir}, b_{ir}` are the weight and bias used to transform from input :math:`x` to :math:`r`.
+    Details can be found in paper
+    `Learning Phrase Representations using RNN Encoder–Decoder for Statistical Machine Translation
+    <https://aclanthology.org/D14-1179.pdf>`_.
+
+    Args:
+        input_size (int): Number of features of input.
+        hidden_size (int):  Number of features of hidden layer.
+        num_layers (int): Number of layers of stacked GRU. Default: 1.
+        has_bias (bool): Whether the cell has bias `b_ih` and `b_hh`. Default: True.
+        batch_first (bool): Specifies whether the first dimension of input `x` is batch_size. Default: False.
+        dropout (float): If not 0.0, append `Dropout` layer on the outputs of each
+            GRU layer except the last layer. Default 0.0. The range of dropout is [0.0, 1.0).
+        bidirectional (bool): Specifies whether it is a bidirectional GRU,
+            num_directions=2 if bidirectional=True otherwise 1. Default: False.
+
+    Inputs:
+        - **x** (Tensor) - Tensor of data type mindspore.float32 and
+          shape (seq_len, batch_size, `input_size`) or (batch_size, seq_len, `input_size`).
+        - **hx** (Tensor) - Tensor of data type mindspore.float32 and
+          shape (num_directions * `num_layers`, batch_size, `hidden_size`). Data type of `hx` must be the same as `x`.
+        - **seq_length** (Tensor) - The length of each sequence in a input batch.
+          Tensor of shape :math:`(\text{batch_size})`. Default: None.
+          This input indicates the real sequence length before padding to avoid padded elements
+          have been used to compute hidden state and affect the final output. It is recommend to
+          use this input when **x** has padding elements.
+
+    Outputs:
+        Tuple, a tuple contains (`output`, `h_n`).
+
+        - **output** (Tensor) - Tensor of shape (seq_len, batch_size, num_directions * `hidden_size`) or
+          (batch_size, seq_len, num_directions * `hidden_size`).
+        - **hx_n** (Tensor) - Tensor of shape (num_directions * `num_layers`, batch_size, `hidden_size`).
+
+    Raises:
+        TypeError: If `input_size`, `hidden_size` or `num_layers` is not an int.
+        TypeError: If `has_bias`, `batch_first` or `bidirectional` is not a bool.
+        TypeError: If `dropout` is neither a float nor an int.
+        ValueError: If `dropout` is not in range [0.0, 1.0).
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
+    Examples:
+        >>> net = nn.GRU(10, 16, 2, has_bias=True, batch_first=True, bidirectional=False)
+        >>> x = Tensor(np.ones([3, 5, 10]).astype(np.float32))
+        >>> h0 = Tensor(np.ones([1 * 2, 3, 16]).astype(np.float32))
+        >>> output, hn = net(x, h0)
+        >>> print(output.shape)
+        (3, 5, 16)
+    """
     def __init__(self, *args, **kwargs):
         mode = 'GRU'
         super(GRU, self).__init__(mode, *args, **kwargs)
 
 class LSTM(_RNNBase):
-    '''LSTM operator class'''
+    r"""
+    Stacked LSTM (Long Short-Term Memory) layers.
+
+    Apply LSTM layer to the input.
+
+    There are two pipelines connecting two consecutive cells in a LSTM model; one is cell state pipeline
+    and the other is hidden state pipeline. Denote two consecutive time nodes as :math:`t-1` and :math:`t`.
+    Given an input :math:`x_t` at time :math:`t`, an hidden state :math:`h_{t-1}` and an cell
+    state :math:`c_{t-1}` of the layer at time :math:`{t-1}`, the cell state and hidden state at
+    time :math:`t` is computed using an gating mechanism. Input gate :math:`i_t` is designed to protect the cell
+    from perturbation by irrelevant inputs. Forget gate :math:`f_t` affords protection of the cell by forgetting
+    some information in the past, which is stored in :math:`h_{t-1}`. Output gate :math:`o_t` protects other
+    units from perturbation by currently irrelevant memory contents. Candidate cell state :math:`\tilde{c}_t` is
+    calculated with the current input, on which the input gate will be applied. Finally, current cell state
+    :math:`c_{t}` and hidden state :math:`h_{t}` are computed with the calculated gates and cell states. The complete
+    formulation is as follows.
+
+    .. math::
+        \begin{array}{ll} \\
+            i_t = \sigma(W_{ix} x_t + b_{ix} + W_{ih} h_{(t-1)} + b_{ih}) \\
+            f_t = \sigma(W_{fx} x_t + b_{fx} + W_{fh} h_{(t-1)} + b_{fh}) \\
+            \tilde{c}_t = \tanh(W_{cx} x_t + b_{cx} + W_{ch} h_{(t-1)} + b_{ch}) \\
+            o_t = \sigma(W_{ox} x_t + b_{ox} + W_{oh} h_{(t-1)} + b_{oh}) \\
+            c_t = f_t * c_{(t-1)} + i_t * \tilde{c}_t \\
+            h_t = o_t * \tanh(c_t) \\
+        \end{array}
+
+    Here :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product. :math:`W, b`
+    are learnable weights between the output and the input in the formula. For instance,
+    :math:`W_{ix}, b_{ix}` are the weight and bias used to transform from input :math:`x` to :math:`i`.
+    Details can be found in paper `LONG SHORT-TERM MEMORY
+    <https://www.bioinf.jku.at/publications/older/2604.pdf>`_ and
+    `Long Short-Term Memory Recurrent Neural Network Architectures for Large Scale Acoustic Modeling
+    <https://static.googleusercontent.com/media/research.google.com/zh-CN//pubs/archive/43905.pdf>`_.
+
+    Args:
+        input_size (int): Number of features of input.
+        hidden_size (int):  Number of features of hidden layer.
+        num_layers (int): Number of layers of stacked LSTM . Default: 1.
+        has_bias (bool): Whether the cell has bias `b_ih` and `b_hh`. Default: True.
+        batch_first (bool): Specifies whether the first dimension of input `x` is batch_size. Default: False.
+        dropout (float, int): If not 0, append `Dropout` layer on the outputs of each
+            LSTM layer except the last layer. Default 0. The range of dropout is [0.0, 1.0].
+        bidirectional (bool): Specifies whether it is a bidirectional LSTM. Default: False.
+
+    Inputs:
+        - **x** (Tensor) - Tensor of shape (seq_len, batch_size, `input_size`) or
+          (batch_size, seq_len, `input_size`).
+        - **hx** (tuple) - A tuple of two Tensors (h_0, c_0) both of data type mindspore.float32 or
+          mindspore.float16 and shape (num_directions * `num_layers`, batch_size, `hidden_size`).
+          Data type of `hx` must be the same as `x`.
+        - **seq_length** (Tensor) - The length of each sequence in a input batch.
+          Tensor of shape :math:`(\text{batch_size})`. Default: None.
+          This input indicates the real sequence length before padding to avoid padded elements
+          have been used to compute hidden state and affect the final output. It is recommend to
+          use this input when **x** has padding elements.
+
+    Outputs:
+        Tuple, a tuple contains (`output`, (`h_n`, `c_n`)).
+
+        - **output** (Tensor) - Tensor of shape (seq_len, batch_size, num_directions * `hidden_size`).
+        - **hx_n** (tuple) - A tuple of two Tensor (h_n, c_n) both of shape
+          (num_directions * `num_layers`, batch_size, `hidden_size`).
+
+    Raises:
+        TypeError: If `input_size`, `hidden_size` or `num_layers` is not an int.
+        TypeError: If `has_bias`, `batch_first` or `bidirectional` is not a bool.
+        TypeError: If `dropout` is neither a float nor an int.
+        ValueError: If `dropout` is not in range [0.0, 1.0].
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
+    Examples:
+        >>> net = nn.LSTM(10, 16, 2, has_bias=True, batch_first=True, bidirectional=False)
+        >>> x = Tensor(np.ones([3, 5, 10]).astype(np.float32))
+        >>> h0 = Tensor(np.ones([1 * 2, 3, 16]).astype(np.float32))
+        >>> c0 = Tensor(np.ones([1 * 2, 3, 16]).astype(np.float32))
+        >>> output, (hn, cn) = net(x, (h0, c0))
+        >>> print(output.shape)
+        (3, 5, 16)
+    """
     def __init__(self, *args, **kwargs):
         mode = 'LSTM'
         super(LSTM, self).__init__(mode, *args, **kwargs)
