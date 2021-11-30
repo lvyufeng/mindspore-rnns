@@ -3,14 +3,40 @@ import math
 import numpy as np
 import mindspore.nn as nn
 import mindspore.ops as P
-import mindspore.numpy as mnp
 from mindspore.common import dtype as mstype
 from mindspore.ops.primitive import constexpr
 from mindspore import Tensor, Parameter, ParameterTuple
 from mindspore import log as logger
 from mindspore import context
+from mindspore._checkparam import Validator as validator
 from .rnn_cells import rnn_relu_cell, rnn_tanh_cell, gru_cell, lstm_cell
 from .rnn_utils import Reverse, ReverseSequence
+
+@constexpr
+def _check_input_dtype(input_dtype, param_name, allow_dtypes, cls_name):
+    validator.check_type_name(param_name, input_dtype, allow_dtypes, cls_name)
+
+
+@constexpr
+def _check_is_tensor(param_name, input_data, cls_name):
+    """Internal function, used to check whether the input data is Tensor."""
+    if input_data is not None and not isinstance(P.typeof(input_data), mstype.tensor_type):
+        raise TypeError(f"For '{cls_name}', the '{param_name}' should be '{mstype.tensor_type}', "
+                        f"but got '{P.typeof(input_data)}'")
+
+@constexpr
+def _check_is_tuple(param_name, input_data, cls_name):
+    """Internal function, used to check whether the input data is Tensor."""
+    if input_data is not None and not isinstance(P.typeof(input_data), mstype.Tuple):
+        raise TypeError(f"For '{cls_name}', the '{param_name}' should be '{mstype.Tuple}', "
+                        f"but got '{P.typeof(input_data)}'")
+
+@constexpr
+def _check_tuple_length(param_name, input_data, length, cls_name):
+    """Internal function, used to check whether the input data is Tensor."""
+    if input_data is not None and len(input_data) != length:
+        raise TypeError(f"For '{cls_name}', the length of '{param_name}' should be '{length}', "
+                        f"but got '{len(input_data)}'")
 
 @constexpr
 def _init_state(shape, dtype, is_lstm):
@@ -20,9 +46,13 @@ def _init_state(shape, dtype, is_lstm):
         return (hx, cx)
     return hx
 
+@constexpr
+def arange(start, stop, step):
+    return Tensor(np.arange(start, stop, step), mstype.int32)
+
 def sequence_mask(lengths, maxlen):
     """generate mask matrix by seq_length"""
-    range_vector = mnp.arange(0, maxlen, 1)
+    range_vector = arange(0, maxlen, 1)
     result = range_vector < lengths.view(lengths.shape + (1,))
     return result.astype(mstype.int32)
 
@@ -33,7 +63,7 @@ def select_by_mask(inputs, mask):
 
 def get_hidden(output, seq_length):
     """get hidden state by seq_length"""
-    batch_index = mnp.arange(0, seq_length.shape[0], 1, mstype.int32)
+    batch_index = arange(0, seq_length.shape[0], 1)
     indices = P.Concat(1)((seq_length.view(-1, 1) - 1, batch_index.view(-1, 1)))
     return P.GatherNd()(output, indices)
 
@@ -386,18 +416,33 @@ class _RNNBase(nn.Cell):
         h_n = P.Concat(0)(h_n)
         return output, h_n.view(h.shape)
 
-    def construct(self, x, h=None, seq_length=None):
+    def construct(self, x, hx=None, seq_length=None):
         '''Defines the RNN like operators performed'''
+        _check_is_tensor("x", x, self.cls_name)
+        _check_input_dtype(x.dtype, "x", [mstype.float32], self.cls_name)
+        if hx is not None:
+            if not self.is_lstm:
+                _check_is_tensor("hx", hx, self.cls_name)
+                _check_input_dtype(hx.dtype, "hx", [mstype.float32], self.cls_name)
+            else:
+                _check_is_tuple('hx', hx, self.cls_name)
+                _check_tuple_length('hx', hx, 2, self.cls_name)
+                _check_is_tensor('hx[0]', hx[0], self.cls_name)
+                _check_is_tensor('hx[1]', hx[1], self.cls_name)
+                _check_input_dtype(hx[0].dtype, "hx[0]", [mstype.float32], self.cls_name)
+                _check_input_dtype(hx[1].dtype, "hx[1]", [mstype.float32], self.cls_name)
+        if seq_length is not None:
+            _check_input_dtype(seq_length.dtype, "seq_length", [mstype.int32, mstype.int64], self.cls_name)
         max_batch_size = x.shape[0] if self.batch_first else x.shape[1]
         num_directions = 2 if self.bidirectional else 1
-        if h is None:
-            h = _init_state((self.num_layers * num_directions, max_batch_size, self.hidden_size), x.dtype, self.is_lstm)
+        if hx is None:
+            hx = _init_state((self.num_layers * num_directions, max_batch_size, self.hidden_size), x.dtype, self.is_lstm)
         if self.batch_first:
             x = P.Transpose()(x, (1, 0, 2))
         if self.bidirectional:
-            x, h = self._stacked_bi_dynamic_rnn(x, h, seq_length)
+            x, h = self._stacked_bi_dynamic_rnn(x, hx, seq_length)
         else:
-            x, h = self._stacked_dynamic_rnn(x, h, seq_length)
+            x, h = self._stacked_dynamic_rnn(x, hx, seq_length)
         if self.batch_first:
             x = P.Transpose()(x, (1, 0, 2))
         return x, h
