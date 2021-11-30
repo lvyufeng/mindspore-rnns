@@ -1,8 +1,14 @@
 '''Utils for RNNs, like Reverse operators'''
 import mindspore
+import numpy as np
 import mindspore.nn as nn
 import mindspore.ops as ops
-import mindspore.numpy as mnp
+from mindspore import Tensor
+from mindspore.ops import constexpr
+
+@constexpr
+def arange(start, stop, step):
+    return Tensor(np.arange(start, stop, step), mindspore.int32)
 
 class Reverse(nn.Cell):
     """Reverse operator, like Reverse in mindspore"""
@@ -12,7 +18,7 @@ class Reverse(nn.Cell):
 
     def construct(self, input_x):
         dim_size = input_x.shape[self.dim]
-        reversed_indexes = mnp.arange(dim_size-1, -1, -1)
+        reversed_indexes = arange(dim_size-1, -1, -1)
         output = ops.Gather()(input_x, reversed_indexes, self.dim)
         return output
 
