@@ -20,6 +20,17 @@ class TestLSTM(unittest.TestCase):
         assert h.shape == (1, 3, self.hidden_size)
         assert c.shape == (1, 3, self.hidden_size)
 
+    def test_lstm_with_hx(self):
+        rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float32)
+        h0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float32)
+        c0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float32)
+        output, (h, c) = rnn(inputs, (h0, c0))
+
+        assert output.shape == (3, 10, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
+        assert c.shape == (1, 3, self.hidden_size)
+
     def test_lstm_bidirection(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True, bidirectional=True)
         inputs = Tensor(self.x, mindspore.float32)
