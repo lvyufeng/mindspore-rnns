@@ -7,7 +7,7 @@ from mindspore import Tensor
 from mindspore.common.parameter import ParameterTuple
 from mindspore.common.parameter import Parameter
 from mindspore.ops import composite as c
-
+from rnns.rnns import GRU as msGRU
 
 class GradOfAllInputsAndParams(nn.Cell):
     def __init__(self, network, sens_param):
@@ -24,7 +24,7 @@ class GradOfAllInputsAndParams(nn.Cell):
 class GRU(nn.Cell):
     def __init__(self, input_size, hidden_size, num_layers, has_bias, batch_first, bidirectional, dropout):
         super(GRU, self).__init__()
-        self.gru = nn.GRU(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, has_bias=has_bias,
+        self.gru = msGRU(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, has_bias=has_bias,
                           batch_first=batch_first, bidirectional=bidirectional, dropout=dropout)
 
     def construct(self, inp, h0):
