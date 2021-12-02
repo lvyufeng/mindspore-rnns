@@ -72,11 +72,6 @@ class GRUWeightBias():
         b_hh_list = ParameterTuple(b_hh_list)
         return w_ih_list, w_hh_list, b_ih_list, b_hh_list
 
-
-@pytest.mark.level0
-@pytest.mark.platform_arm_ascend_training
-@pytest.mark.platform_x86_ascend_training
-@pytest.mark.env_onecard
 def test_sit_gru_forward_input_3_32_32_is_32_hs_16():
     input_size = 32
     hidden_size = 16
@@ -110,14 +105,11 @@ def test_sit_gru_forward_input_3_32_32_is_32_hs_16():
     net_pynative.gru.b_ih_list = b_ih_list
     net_pynative.gru.b_hh_list = b_hh_list
     out_pynative, hy_pynative = net_pynative(input_ms, h0)
+    context.set_context(mode=context.GRAPH_MODE)
 
     assert np.allclose(out.asnumpy(), out_pynative.asnumpy(), 0.0001, 0.0001)
     assert np.allclose(hy.asnumpy(), hy_pynative.asnumpy(), 0.0001, 0.0001)
 
-@pytest.mark.level0
-@pytest.mark.platform_arm_ascend_training
-@pytest.mark.platform_x86_ascend_training
-@pytest.mark.env_onecard
 def test_sit_gru_grad_input_3_32_32_is_32_hs_16():
     input_size = 32
     hidden_size = 16
@@ -161,6 +153,7 @@ def test_sit_gru_grad_input_3_32_32_is_32_hs_16():
     out_grad_pynative, _ = grad_net_inp_pynative(input_ms, h0)
     x_grad_pynative = out_grad_pynative[0].asnumpy()
     h_grad_pynative = out_grad_pynative[1].asnumpy()
+    context.set_context(mode=context.GRAPH_MODE)
 
     assert np.allclose(x_grad, x_grad_pynative, 0.0001, 0.0001)
     assert np.allclose(h_grad, h_grad_pynative, 0.0001, 0.0001)

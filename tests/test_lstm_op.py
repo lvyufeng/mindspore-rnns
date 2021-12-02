@@ -73,10 +73,6 @@ class LSTMWeightBias():
         b_hh_list = ParameterTuple(b_hh_list)
         return w_ih_list, w_hh_list, b_ih_list, b_hh_list
 
-@pytest.mark.level0
-@pytest.mark.platform_arm_ascend_training
-@pytest.mark.platform_x86_ascend_training
-@pytest.mark.env_onecard
 def test_sit_lstm_forward_input_3_32_32_is_32_hs_16():
     input_s = 32
     hidden_s = 16
@@ -113,15 +109,12 @@ def test_sit_lstm_forward_input_3_32_32_is_32_hs_16():
     out_pynative, (hy_pynative, cy_pynative) = net_pynative(input_ms, h0, c0)
 
     print(cy.asnumpy(), cy_pynative.asnumpy())
+    context.set_context(mode=context.GRAPH_MODE)
+
     assert np.allclose(out.asnumpy(), out_pynative.asnumpy(), 0.0001, 0.0001)
     assert np.allclose(hy.asnumpy(), hy_pynative.asnumpy(), 0.0001, 0.0001)
     assert np.allclose(cy.asnumpy(), cy_pynative.asnumpy(), 0.0001, 0.0001)
 
-
-@pytest.mark.level0
-@pytest.mark.platform_arm_ascend_training
-@pytest.mark.platform_x86_ascend_training
-@pytest.mark.env_onecard
 def test_sit_lstm_grad_input_3_32_32_is_32_hs_16():
     input_s = 32
     hidden_s = 16
@@ -168,6 +161,7 @@ def test_sit_lstm_grad_input_3_32_32_is_32_hs_16():
     x_grad_pynative = out_grad_pynative[0].asnumpy()
     h_grad_pynative = out_grad_pynative[1].asnumpy()
     c_grad_pynative = out_grad_pynative[2].asnumpy()
+    context.set_context(mode=context.GRAPH_MODE)
 
     assert np.allclose(x_grad, x_grad_pynative, 0.0001, 0.0001)
     assert np.allclose(h_grad, h_grad_pynative, 0.0001, 0.0001)
