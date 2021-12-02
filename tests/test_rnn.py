@@ -84,8 +84,8 @@ class TestRNN(unittest.TestCase):
         outputs_ms, h_ms = rnn_ms(inputs_ms)
         outputs_pt, h_pt = rnn_pt(inputs_pt)
 
-        assert np.allclose(outputs_ms.asnumpy(), outputs_pt.detach().numpy(), 1e-4, 1e-4)
-        assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-4, 1e-4)
+        assert np.allclose(outputs_ms.asnumpy(), outputs_pt.detach().numpy(), 1e-3, 1e-3)
+        assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-3, 1e-3)
 
         # backward
         grad_param = ops.GradOperation(get_by_list=True)
@@ -96,4 +96,4 @@ class TestRNN(unittest.TestCase):
         rnn_pt_grads = [param.grad for param in rnn_pt.parameters()]
         
         for ms_grad, pt_grad in zip(rnn_ms_grads, rnn_pt_grads):
-            assert np.allclose(ms_grad.asnumpy(), pt_grad.detach().numpy(), 1e-4, 1e-4)
+            assert np.allclose(ms_grad.asnumpy(), pt_grad.detach().numpy(), 1e-3, 1e-3)

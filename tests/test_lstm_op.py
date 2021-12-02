@@ -8,7 +8,7 @@ from mindspore.common.initializer import initializer
 from mindspore.common.parameter import ParameterTuple
 from mindspore.common.parameter import Parameter
 from mindspore.ops import composite as c
-
+from rnns.rnns import LSTM as msLSTM
 
 class GradOfAllInputsAndParams(nn.Cell):
     def __init__(self, network, sens_param):
@@ -25,7 +25,7 @@ class GradOfAllInputsAndParams(nn.Cell):
 class LSTM(nn.Cell):
     def __init__(self, input_s, hidden_s, num_layers, has_bias, batch_first, bidirectional, dropout):
         super().__init__()
-        self.lstm = nn.LSTM(input_size=input_s, hidden_size=hidden_s, num_layers=num_layers, has_bias=has_bias,
+        self.lstm = msLSTM(input_size=input_s, hidden_size=hidden_s, num_layers=num_layers, has_bias=has_bias,
                             batch_first=batch_first, bidirectional=bidirectional, dropout=dropout)
 
     def construct(self, inp, h0, c0):
