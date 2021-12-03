@@ -163,6 +163,6 @@ def test_sit_lstm_grad_input_3_32_32_is_32_hs_16():
     c_grad_pynative = out_grad_pynative[2].asnumpy()
     context.set_context(mode=context.GRAPH_MODE)
 
-    assert np.allclose(x_grad, x_grad_pynative, 0.0001, 0.0001)
-    assert np.allclose(h_grad, h_grad_pynative, 0.0001, 0.0001)
-    assert np.allclose(c_grad, c_grad_pynative, 0.0001, 0.0001)
+    assert np.allclose(x_grad, x_grad_pynative, 0.001, 0.001)
+    assert np.allclose(h_grad, h_grad_pynative, 0.001, 0.001)
+    assert np.allclose(c_grad, c_grad_pynative, 0.001, 0.001)
