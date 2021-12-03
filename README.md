@@ -8,7 +8,7 @@ Copy the implementation in your source code. If you want to use RNN opeators, co
 import mindspore
 from rnns.rnns import RNN, GRU, LSTM
 
-rnn = RNN(16, 32， num_layers=1)
+rnn = RNN(16, 32, num_layers=1)
 gru = GRU(16, 32, has_bias=False)
 lstm = LSTM(16, 32, bidrectional=True)
 ```
