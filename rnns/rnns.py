@@ -140,8 +140,10 @@ class _DynamicRNNBase(nn.Cell):
 
     def construct(self, x, h, seq_length, w_ih, w_hh, b_ih, b_hh):
         if seq_length is None:
-            return self.recurrent(x, h, w_ih, w_hh, b_ih, b_hh)
-        return self.variable_recurrent(x, h, seq_length, w_ih, w_hh, b_ih, b_hh)
+            return self.recurrent(x, h, w_ih.astype(x.dtype), w_hh.astype(x.dtype), \
+                                  b_ih.astype(x.dtype), b_hh.astype(x.dtype))
+        return self.variable_recurrent(x, h, seq_length, w_ih.astype(x.dtype), w_hh.astype(x.dtype), \
+                                       b_ih.astype(x.dtype), b_hh.astype(x.dtype))
 
 class _DynamicRNN_Relu(_DynamicRNNBase):
     def __init__(self):
@@ -221,9 +223,10 @@ class _DynamicLSTM_CPU_GPU(nn.Cell):
                 x,
                 h_0[0].view(1, *h_0[0].shape),
                 h_0[1].view(1, *h_0[1].shape),
-                weights
+                weights.astype(x.dtype)
             )
         return output, (h_n, c_n)
+
 class _DynamicLSTM_Ascend(nn.Cell):
     def __init__(self):
         super().__init__()
@@ -426,34 +429,37 @@ class _RNNBase(nn.Cell):
 
     def construct(self, x, hx=None, seq_length=None):
         '''Defines the RNN like operators performed'''
+        max_batch_size = x.shape[0] if self.batch_first else x.shape[1]
+        num_directions = 2 if self.bidirectional else 1
         _check_is_tensor("x", x, self.cls_name)
-        _check_input_dtype(x.dtype, "x", [mstype.float32], self.cls_name)
+        _check_input_dtype(x.dtype, "x", [mstype.float32, mstype.float16], self.cls_name)
         if hx is not None:
             if not self.is_lstm:
-                _check_is_tensor("hx", hx, self.cls_name)
-                _check_input_dtype(hx.dtype, "hx", [mstype.float32], self.cls_name)
+                _check_is_tensor("h", hx, self.cls_name)
+                _check_input_dtype(hx.dtype, "hx", [mstype.float32, mstype.float16], self.cls_name)
             else:
                 _check_is_tuple('hx', hx, self.cls_name)
                 _check_tuple_length('hx', hx, 2, self.cls_name)
                 _check_is_tensor('hx[0]', hx[0], self.cls_name)
                 _check_is_tensor('hx[1]', hx[1], self.cls_name)
-                _check_input_dtype(hx[0].dtype, "hx[0]", [mstype.float32], self.cls_name)
-                _check_input_dtype(hx[1].dtype, "hx[1]", [mstype.float32], self.cls_name)
+                _check_input_dtype(hx[0].dtype, "hx[0]", [mstype.float32, mstype.float16], self.cls_name)
+                _check_input_dtype(hx[1].dtype, "hx[1]", [mstype.float32, mstype.float16], self.cls_name)
+        else:
+            hx = _init_state((self.num_layers * num_directions, max_batch_size, self.hidden_size), \
+                             x.dtype, self.is_lstm)
         if seq_length is not None:
             _check_input_dtype(seq_length.dtype, "seq_length", [mstype.int32, mstype.int64], self.cls_name)
-        max_batch_size = x.shape[0] if self.batch_first else x.shape[1]
-        num_directions = 2 if self.bidirectional else 1
-        if hx is None:
-            hx = _init_state((self.num_layers * num_directions, max_batch_size, self.hidden_size), x.dtype, self.is_lstm)
         if self.batch_first:
             x = P.Transpose()(x, (1, 0, 2))
         if self.bidirectional:
-            x, h = self._stacked_bi_dynamic_rnn(x, hx, seq_length)
+            x_n, hx_n = self._stacked_bi_dynamic_rnn(x, hx, seq_length)
         else:
-            x, h = self._stacked_dynamic_rnn(x, hx, seq_length)
+            x_n, hx_n = self._stacked_dynamic_rnn(x, hx, seq_length)
         if self.batch_first:
-            x = P.Transpose()(x, (1, 0, 2))
-        return x, h
+            x_n = P.Transpose()(x_n, (1, 0, 2))
+        if not self.is_lstm:
+            return x_n.astype(x.dtype), hx_n.astype(hx.dtype)
+        return x_n.astype(x.dtype), (hx_n[0].astype(hx[0].dtype), hx_n[1].astype(hx[1].dtype))
 
 class RNN(_RNNBase):
     r"""

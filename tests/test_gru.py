@@ -19,6 +19,15 @@ class TestGRU(unittest.TestCase):
         assert output.shape == (3, 10, 32)
         assert h.shape == (1, 3, 32)
 
+    def test_gru_fp16(self):
+        rnn = GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float16)
+        output, h = rnn(inputs)
+
+        assert output.shape == (3, 10, 32)
+        assert h.shape == (1, 3, 32)
+        assert output.dtype == mindspore.float16
+
     def test_gru_bidirection(self):
         rnn = GRU(self.input_size, self.hidden_size, batch_first=True, bidirectional=True)
         inputs = Tensor(self.x, mindspore.float32)

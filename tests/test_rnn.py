@@ -19,6 +19,14 @@ class TestRNN(unittest.TestCase):
         assert output.shape == (3, 10, 20)
         assert h.shape == (1, 3, 20)
 
+    def test_rnn_fp16(self):
+        rnn = RNN(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float16)
+        output, h = rnn(inputs)
+
+        assert output.shape == (3, 10, 20)
+        assert h.shape == (1, 3, 20)
+
     def test_rnn_bidirection(self):
         rnn = RNN(self.input_size, self.hidden_size, batch_first=True, bidirectional=True)
         inputs = Tensor(self.x, mindspore.float32)

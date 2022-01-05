@@ -20,11 +20,32 @@ class TestLSTM(unittest.TestCase):
         assert h.shape == (1, 3, self.hidden_size)
         assert c.shape == (1, 3, self.hidden_size)
 
+    def test_lstm_fp16(self):
+        rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float16)
+        output, (h, c) = rnn(inputs)
+
+        assert output.shape == (3, 10, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
+        assert c.shape == (1, 3, self.hidden_size)
+        assert output.dtype == mindspore.float16
+
     def test_lstm_with_hx(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
         h0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float32)
         c0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float32)
+        output, (h, c) = rnn(inputs, (h0, c0))
+
+        assert output.shape == (3, 10, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
+        assert c.shape == (1, 3, self.hidden_size)
+
+    def test_lstm_with_hx_fp16(self):
+        rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float16)
+        h0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float16)
+        c0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float16)
         output, (h, c) = rnn(inputs, (h0, c0))
 
         assert output.shape == (3, 10, self.hidden_size)
