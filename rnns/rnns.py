@@ -16,6 +16,10 @@ from .rnn_utils import Reverse, ReverseSequence
 def _check_input_dtype(input_dtype, param_name, allow_dtypes, cls_name):
     validator.check_type_name(param_name, input_dtype, allow_dtypes, cls_name)
 
+@constexpr
+def _check_input_dtype_same_and_valid(args_name, args_value, valid_values, cls_name):
+    args = {args_name[i]:args_value[i] for i in range(len(args_value))}
+    validator.check_types_same_and_valid(args, valid_values, cls_name)
 
 @constexpr
 def _check_is_tensor(param_name, input_data, cls_name):
@@ -37,6 +41,12 @@ def _check_tuple_length(param_name, input_data, length, cls_name):
     if input_data is not None and len(input_data) != length:
         raise TypeError(f"For '{cls_name}', the length of '{param_name}' should be '{length}', "
                         f"but got '{len(input_data)}'")
+
+@constexpr
+def _check_seq_length_size(batch_size_x, seq_length_size, cls_name):
+    if batch_size_x != seq_length_size:
+        raise ValueError(f"For '{cls_name}' batch size of x and seq_length should be equal, "
+                         f"but got {batch_size_x} of x and {seq_length_size} of seq_length.")
 
 @constexpr
 def _init_state(shape, dtype, is_lstm):
@@ -139,11 +149,12 @@ class _DynamicRNNBase(nn.Cell):
         return outputs, state_t
 
     def construct(self, x, h, seq_length, w_ih, w_hh, b_ih, b_hh):
+        x_dtype = x.dtype
         if seq_length is None:
-            return self.recurrent(x, h, w_ih.astype(x.dtype), w_hh.astype(x.dtype), \
-                                  b_ih.astype(x.dtype), b_hh.astype(x.dtype))
-        return self.variable_recurrent(x, h, seq_length, w_ih.astype(x.dtype), w_hh.astype(x.dtype), \
-                                       b_ih.astype(x.dtype), b_hh.astype(x.dtype))
+            return self.recurrent(x, h, w_ih.astype(x_dtype), w_hh.astype(x_dtype), \
+                                  b_ih.astype(x_dtype), b_hh.astype(x_dtype))
+        return self.variable_recurrent(x, h, seq_length, w_ih.astype(x_dtype), w_hh.astype(x_dtype), \
+                                       b_ih.astype(x_dtype), b_hh.astype(x_dtype))
 
 class _DynamicRNN_Relu(_DynamicRNNBase):
     def __init__(self):
@@ -432,23 +443,26 @@ class _RNNBase(nn.Cell):
         max_batch_size = x.shape[0] if self.batch_first else x.shape[1]
         num_directions = 2 if self.bidirectional else 1
         _check_is_tensor("x", x, self.cls_name)
-        _check_input_dtype(x.dtype, "x", [mstype.float32, mstype.float16], self.cls_name)
+        x_dtype = x.dtype
         if hx is not None:
             if not self.is_lstm:
                 _check_is_tensor("h", hx, self.cls_name)
-                _check_input_dtype(hx.dtype, "hx", [mstype.float32, mstype.float16], self.cls_name)
+                args = {'x': x_dtype, 'hx': hx.dtype}
+                _check_input_dtype_same_and_valid(['x', 'hx'], [x_dtype, hx.dtype], \
+                                                  [mstype.float32, mstype.float16], self.cls_name)
             else:
                 _check_is_tuple('hx', hx, self.cls_name)
                 _check_tuple_length('hx', hx, 2, self.cls_name)
                 _check_is_tensor('hx[0]', hx[0], self.cls_name)
                 _check_is_tensor('hx[1]', hx[1], self.cls_name)
-                _check_input_dtype(hx[0].dtype, "hx[0]", [mstype.float32, mstype.float16], self.cls_name)
-                _check_input_dtype(hx[1].dtype, "hx[1]", [mstype.float32, mstype.float16], self.cls_name)
+                _check_input_dtype_same_and_valid(['x', 'hx[0]', 'hx[1]'], [x_dtype, hx[0].dtype, hx[1].dtype], \
+                                                 [mstype.float32, mstype.float16], self.cls_name)
         else:
             hx = _init_state((self.num_layers * num_directions, max_batch_size, self.hidden_size), \
-                             x.dtype, self.is_lstm)
+                             x_dtype, self.is_lstm)
         if seq_length is not None:
             _check_input_dtype(seq_length.dtype, "seq_length", [mstype.int32, mstype.int64], self.cls_name)
+            _check_seq_length_size(max_batch_size, seq_length.shape[0], self.cls_name)
         if self.batch_first:
             x = P.Transpose()(x, (1, 0, 2))
         if self.bidirectional:
@@ -458,8 +472,8 @@ class _RNNBase(nn.Cell):
         if self.batch_first:
             x_n = P.Transpose()(x_n, (1, 0, 2))
         if not self.is_lstm:
-            return x_n.astype(x.dtype), hx_n.astype(hx.dtype)
-        return x_n.astype(x.dtype), (hx_n[0].astype(hx[0].dtype), hx_n[1].astype(hx[1].dtype))
+            return x_n.astype(x_dtype), hx_n.astype(x_dtype)
+        return x_n.astype(x_dtype), (hx_n[0].astype(x_dtype), hx_n[1].astype(x_dtype))
 
 class RNN(_RNNBase):
     r"""
