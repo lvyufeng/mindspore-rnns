@@ -2,7 +2,7 @@ import unittest
 import mindspore
 import numpy as np
 import mindspore.ops as ops
-from mindspore import Tensor, context
+from mindspore import Tensor, ParameterTuple
 from rnns import LSTM
 import torch
 
@@ -19,6 +19,25 @@ class TestLSTM(unittest.TestCase):
         assert output.shape == (3, 10, self.hidden_size)
         assert h.shape == (1, 3, self.hidden_size)
         assert c.shape == (1, 3, self.hidden_size)
+
+    def test_lstm_seq_length(self):
+        rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float32)
+        seq_length = Tensor([7, 8, 9], mindspore.int64)
+        output, (h, c) = rnn(inputs, seq_length=seq_length)
+
+        assert output.shape == (3, 10, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
+        assert c.shape == (1, 3, self.hidden_size)
+
+    def test_lstm_long(self):
+        self.x = np.random.randn(3, 10000, self.input_size)
+        rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float32)
+        output, h = rnn(inputs)
+
+        assert output.shape == (3, 10000, self.hidden_size)
+        assert h[0].shape == (1, 3, self.hidden_size)
 
     def test_lstm_fp16(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
@@ -130,7 +149,7 @@ class TestLSTM(unittest.TestCase):
 
         # backward
         grad_param = ops.GradOperation(get_by_list=True)
-        rnn_ms_grads = grad_param(rnn_ms, rnn_ms.trainable_params())(inputs_ms)
+        rnn_ms_grads = grad_param(rnn_ms, ParameterTuple(rnn_ms.trainable_params()))(inputs_ms)
 
         outputs_pt.backward(torch.ones_like(outputs_pt), retain_graph=True)
         h_pt.backward(torch.ones_like(h_pt), retain_graph=True)

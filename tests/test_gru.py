@@ -2,7 +2,7 @@ import unittest
 import mindspore
 import numpy as np
 import mindspore.ops as ops
-from mindspore import Tensor
+from mindspore import Tensor, ParameterTuple
 from rnns import GRU
 import torch
 
@@ -18,6 +18,24 @@ class TestGRU(unittest.TestCase):
 
         assert output.shape == (3, 10, 32)
         assert h.shape == (1, 3, 32)
+
+    def test_gru_seq_length(self):
+        rnn = GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float32)
+        seq_length = Tensor([7, 8, 9], mindspore.int64)
+        output, h = rnn(inputs, seq_length=seq_length)
+
+        assert output.shape == (3, 10, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
+
+    def test_gru_long(self):
+        self.x = np.random.randn(3, 10000, self.input_size)
+        rnn = GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float32)
+        output, h = rnn(inputs)
+
+        assert output.shape == (3, 10000, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
 
     def test_gru_fp16(self):
         rnn = GRU(self.input_size, self.hidden_size, batch_first=True)
@@ -98,7 +116,7 @@ class TestGRU(unittest.TestCase):
 
         # backward
         grad_param = ops.GradOperation(get_by_list=True)
-        rnn_ms_grads = grad_param(rnn_ms, rnn_ms.trainable_params())(inputs_ms)
+        rnn_ms_grads = grad_param(rnn_ms, ParameterTuple(rnn_ms.trainable_params()))(inputs_ms)
 
         outputs_pt.backward(torch.ones_like(outputs_pt), retain_graph=True)
         h_pt.backward(torch.ones_like(h_pt), retain_graph=True)

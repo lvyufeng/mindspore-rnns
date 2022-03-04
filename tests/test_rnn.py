@@ -1,7 +1,7 @@
 import unittest
 import mindspore
 import numpy as np
-from mindspore import Tensor
+from mindspore import Tensor, ParameterTuple
 import mindspore.ops as ops
 from rnns import RNN
 import torch
@@ -19,13 +19,31 @@ class TestRNN(unittest.TestCase):
         assert output.shape == (3, 10, 20)
         assert h.shape == (1, 3, 20)
 
+    def test_gru_long(self):
+        self.x = np.random.randn(3, 10000, self.input_size)
+        rnn = RNN(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float32)
+        output, h = rnn(inputs)
+
+        assert output.shape == (3, 10000, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
+
+    def test_rnn_long(self):
+        self.x = np.random.randn(3, 10000, self.input_size)
+        rnn = RNN(self.input_size, self.hidden_size, batch_first=True)
+        inputs = Tensor(self.x, mindspore.float32)
+        output, h = rnn(inputs)
+
+        assert output.shape == (3, 10000, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
+
     def test_rnn_fp16(self):
         rnn = RNN(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float16)
         output, h = rnn(inputs)
 
-        assert output.shape == (3, 10, 20)
-        assert h.shape == (1, 3, 20)
+        assert output.shape == (3, 10, self.hidden_size)
+        assert h.shape == (1, 3, self.hidden_size)
 
     def test_rnn_bidirection(self):
         rnn = RNN(self.input_size, self.hidden_size, batch_first=True, bidirectional=True)
@@ -97,7 +115,7 @@ class TestRNN(unittest.TestCase):
 
         # backward
         grad_param = ops.GradOperation(get_by_list=True)
-        rnn_ms_grads = grad_param(rnn_ms, rnn_ms.trainable_params())(inputs_ms)
+        rnn_ms_grads = grad_param(rnn_ms, ParameterTuple(rnn_ms.trainable_params()))(inputs_ms)
 
         outputs_pt.backward(torch.ones_like(outputs_pt), retain_graph=True)
         h_pt.backward(torch.ones_like(h_pt), retain_graph=True)
