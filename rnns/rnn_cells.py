@@ -1,63 +1,67 @@
 '''RNN Cells module, include RNNCell, GRUCell, LSTMCell'''
 import math
 import numpy as np
-import mindspore.nn as nn
-import mindspore.ops as P
+from mindspore import nn, ops
 from mindspore import Tensor, Parameter
 from mindspore.common.initializer import initializer, Uniform
+from mindspore.ops._primitive_cache import _get_cache_prim
+
+def matmul(x, y):
+    _matmul = _get_cache_prim(ops.MatMul)(False, True)
+    return _matmul(x, y)
 
 def rnn_tanh_cell(inputs, hidden, w_ih, w_hh, b_ih, b_hh):
     '''RNN cell function with tanh activation'''
     if b_ih is None:
-        igates = P.MatMul(False, True)(inputs, w_ih)
-        hgates = P.MatMul(False, True)(hidden, w_hh)
+        igates = matmul(inputs, w_ih)
+        hgates = matmul(hidden, w_hh)
     else:
-        igates = P.MatMul(False, True)(inputs, w_ih) + b_ih
-        hgates = P.MatMul(False, True)(hidden, w_hh) + b_hh
-    return P.Tanh()(igates + hgates)
+        igates = matmul(inputs, w_ih) + b_ih
+        hgates = matmul(hidden, w_hh) + b_hh
+    return ops.tanh(igates + hgates)
 
 def rnn_relu_cell(inputs, hidden, w_ih, w_hh, b_ih, b_hh):
     '''RNN cell function with relu activation'''
     if b_ih is None:
-        igates = P.MatMul(False, True)(inputs, w_ih)
-        hgates = P.MatMul(False, True)(hidden, w_hh)
+        igates = matmul(inputs, w_ih)
+        hgates = matmul(hidden, w_hh)
     else:
-        igates = P.MatMul(False, True)(inputs, w_ih) + b_ih
-        hgates = P.MatMul(False, True)(hidden, w_hh) + b_hh
-    return P.ReLU()(igates + hgates)
+        igates = matmul(inputs, w_ih) + b_ih
+        hgates = matmul(hidden, w_hh) + b_hh
+    return ops.relu(igates + hgates)
 
 def lstm_cell(inputs, hx, cx, w_ih, w_hh, b_ih, b_hh):
     '''LSTM cell function'''
     if b_ih is None:
-        gates = P.MatMul(False, True)(inputs, w_ih) + P.MatMul(False, True)(hx, w_hh)
+        gates = matmul(inputs, w_ih) + matmul(hx, w_hh)
     else:
-        gates = P.MatMul(False, True)(inputs, w_ih) + P.MatMul(False, True)(hx, w_hh) + b_ih + b_hh
-    ingate, forgetgate, cellgate, outgate = P.Split(1, 4)(gates)
+        gates = matmul(inputs, w_ih) + matmul(hx, w_hh) + b_ih + b_hh
+    ingate, forgetgate, cellgate, outgate = ops.split(gates, 1, 4)
 
-    ingate = P.Sigmoid()(ingate)
-    forgetgate = P.Sigmoid()(forgetgate)
-    cellgate = P.Tanh()(cellgate)
-    outgate = P.Sigmoid()(outgate)
+    ingate = ops.sigmoid(ingate)
+    forgetgate = ops.sigmoid(forgetgate)
+    cellgate = ops.tanh(cellgate)
+    outgate = ops.sigmoid(outgate)
 
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * P.Tanh()(cy)
+    hy = outgate * ops.tanh(cy)
 
     return hy, cy
 
 def gru_cell(inputs, hidden, w_ih, w_hh, b_ih, b_hh):
     '''GRU cell function'''
     if b_ih is None:
-        gi = P.MatMul(False, True)(inputs, w_ih)
-        gh = P.MatMul(False, True)(hidden, w_hh)
+        gi = matmul(inputs, w_ih)
+        gh = matmul(hidden, w_hh)
     else:
-        gi = P.MatMul(False, True)(inputs, w_ih) + b_ih
-        gh = P.MatMul(False, True)(hidden, w_hh) + b_hh
-    i_r, i_i, i_n = P.Split(1, 3)(gi)
-    h_r, h_i, h_n = P.Split(1, 3)(gh)
+        gi = matmul(inputs, w_ih) + b_ih
+        gh = matmul(hidden, w_hh) + b_hh
+    i_r, i_i, i_n = ops.split(gi, 1, 3)
+    h_r, h_i, h_n = ops.split(gh, 1, 3)
 
-    resetgate = P.Sigmoid()(i_r + h_r)
-    inputgate = P.Sigmoid()(i_i + h_i)
-    newgate = P.Tanh()(i_n + resetgate * h_n)
+    resetgate = ops.sigmoid(i_r + h_r)
+    inputgate = ops.sigmoid(i_i + h_i)
+    newgate = ops.tanh(i_n + resetgate * h_n)
     hy = newgate + inputgate * (hidden - newgate)
 
     return hy

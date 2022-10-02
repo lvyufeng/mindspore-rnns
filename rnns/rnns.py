@@ -11,7 +11,6 @@ from mindspore import context
 from mindspore._checkparam import Validator as validator
 from mindspore.ops.operations._rl_inner_ops import CudnnGRU
 from .rnn_cells import rnn_relu_cell, rnn_tanh_cell, gru_cell, lstm_cell
-from .rnn_utils import Reverse, ReverseSequence
 
 @constexpr
 def _check_input_dtype(input_dtype, param_name, allow_dtypes, cls_name):
@@ -99,7 +98,7 @@ class _DynamicRNN(nn.Cell):
         while t < time_step:
             x_t = x[t]
             h = self.cell(x_t, h, w_ih, w_hh, b_ih, b_hh)
-            outputs[t] = h
+            outputs[t,:,:] = h
             t += 1
 
         if seq_length is not None:
@@ -124,13 +123,13 @@ class _DynamicLSTM(nn.Cell):
         outputs = P.Zeros()((time_step, hx.shape[0], hx.shape[1]), x.dtype)
         cells = P.Zeros()((time_step, cx.shape[0], cx.shape[1]), x.dtype)
 
-        t = P.ScalarToTensor()(0, mstype.int64)
+        t = Tensor(0)
         while t < time_step:
             x_t = x[t]
             hx, cx = self.cell(x_t, hx, cx, w_ih, w_hh, b_ih, b_hh)
             
-            outputs[t] = hx
-            cells[t] = cx
+            outputs[t,:,:] = hx
+            cells[t,:,:] = cx
             t += 1
 
         if seq_length is not None:
@@ -323,12 +322,8 @@ class _RNNBase(nn.Cell):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        if context.get_context("device_target") == "CPU":
-            self.reverse = Reverse(0)
-            self.reverse_sequence = ReverseSequence(0, 1)
-        else:
-            self.reverse = P.ReverseV2([0])
-            self.reverse_sequence = P.ReverseSequence(0, 1)
+        self.reverse = P.ReverseV2([0])
+        self.reverse_sequence = P.ReverseSequence(0, 1)
         self.hidden_size = hidden_size
         self.batch_first = batch_first
         self.num_layers = num_layers
