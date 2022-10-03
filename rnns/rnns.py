@@ -1,8 +1,7 @@
 '''RNN operators module, include RNN, GRU, LSTM'''
 import math
 import numpy as np
-import mindspore.nn as nn
-import mindspore.ops as P
+from mindspore import nn, ops
 from mindspore.common import dtype as mstype
 from mindspore.ops.primitive import constexpr
 from mindspore import Tensor, Parameter, ParameterTuple
@@ -11,42 +10,6 @@ from mindspore import context
 from mindspore._checkparam import Validator as validator
 from mindspore.ops.operations._rl_inner_ops import CudnnGRU
 from .rnn_cells import rnn_relu_cell, rnn_tanh_cell, gru_cell, lstm_cell
-
-@constexpr
-def _check_input_dtype(input_dtype, param_name, allow_dtypes, cls_name):
-    validator.check_type_name(param_name, input_dtype, allow_dtypes, cls_name)
-
-@constexpr
-def _check_input_dtype_same_and_valid(args_name, args_value, valid_values, cls_name):
-    args = {args_name[i]:args_value[i] for i in range(len(args_value))}
-    validator.check_types_same_and_valid(args, valid_values, cls_name)
-
-@constexpr
-def _check_is_tensor(param_name, input_data, cls_name):
-    """Internal function, used to check whether the input data is Tensor."""
-    if input_data is not None and not isinstance(P.typeof(input_data), mstype.tensor_type):
-        raise TypeError(f"For '{cls_name}', the '{param_name}' should be '{mstype.tensor_type}', "
-                        f"but got '{P.typeof(input_data)}'")
-
-@constexpr
-def _check_is_tuple(param_name, input_data, cls_name):
-    """Internal function, used to check whether the input data is Tensor."""
-    if input_data is not None and not isinstance(P.typeof(input_data), mstype.Tuple):
-        raise TypeError(f"For '{cls_name}', the '{param_name}' should be '{mstype.Tuple}', "
-                        f"but got '{P.typeof(input_data)}'")
-
-@constexpr
-def _check_tuple_length(param_name, input_data, length, cls_name):
-    """Internal function, used to check whether the input data is Tensor."""
-    if input_data is not None and len(input_data) != length:
-        raise TypeError(f"For '{cls_name}', the length of '{param_name}' should be '{length}', "
-                        f"but got '{len(input_data)}'")
-
-@constexpr
-def _check_seq_length_size(batch_size_x, seq_length_size, cls_name):
-    if batch_size_x != seq_length_size:
-        raise ValueError(f"For '{cls_name}' batch size of x and seq_length should be equal, "
-                         f"but got {batch_size_x} of x and {seq_length_size} of seq_length.")
 
 @constexpr
 def _init_state(shape, dtype, is_lstm):
@@ -74,8 +37,8 @@ def select_by_mask(inputs, mask):
 def get_hidden(output, seq_length):
     """get hidden state by seq_length"""
     batch_index = arange(0, seq_length.shape[0], 1, seq_length.dtype)
-    indices = P.Concat(1)((seq_length.view(-1, 1) - 1, batch_index.view(-1, 1)))
-    return P.GatherNd()(output, indices)
+    indices = ops.concat((seq_length.view(-1, 1) - 1, batch_index.view(-1, 1)), 1)
+    return ops.gather_nd(output, indices)
 
 
 class _DynamicRNN(nn.Cell):
@@ -92,9 +55,11 @@ class _DynamicRNN(nn.Cell):
 
     def _construct(self, x, h, seq_length, w_ih, w_hh, b_ih, b_hh):
         time_step = x.shape[0]
-        outputs = P.Zeros()((time_step, h.shape[0], h.shape[1]), x.dtype)
+        x_dtype = x.dtype
+        h_shape = h.shape
+        outputs = Tensor(np.zeros((time_step, h_shape[0], h_shape[1])), x_dtype)
 
-        t = P.ScalarToTensor()(0, mstype.int64)
+        t = Tensor(0)
         while t < time_step:
             x_t = x[t]
             h = self.cell(x_t, h, w_ih, w_hh, b_ih, b_hh)
@@ -120,8 +85,12 @@ class _DynamicLSTM(nn.Cell):
     def _construct(self, x, h, seq_length, w_ih, w_hh, b_ih, b_hh):
         hx, cx = h
         time_step = x.shape[0]
-        outputs = P.Zeros()((time_step, hx.shape[0], hx.shape[1]), x.dtype)
-        cells = P.Zeros()((time_step, cx.shape[0], cx.shape[1]), x.dtype)
+        x_dtype = x.dtype
+        hx_shape = hx.shape
+        outputs = Tensor(np.ones((time_step, hx_shape[0], hx_shape[1])), x_dtype)
+        cells = Tensor(np.ones((time_step, hx_shape[0], hx_shape[1])), x_dtype)
+        # P.Zeros()((time_step, hx.shape[0], hx.shape[1]), x.dtype)
+        # cells = P.Zeros()((time_step, cx.shape[0], cx.shape[1]), x.dtype)
 
         t = Tensor(0)
         while t < time_step:
@@ -147,7 +116,6 @@ class _DynamicLSTM(nn.Cell):
 class _DynamicGRU_CPU_GPU(nn.Cell):
     def __init__(self):
         super().__init__()
-        self.concat = P.Concat()
         self.is_gpu = context.get_context("device_target") == "GPU"
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
@@ -155,14 +123,14 @@ class _DynamicGRU_CPU_GPU(nn.Cell):
         hidden_size = gate_size // 3
         if self.is_gpu:
             if b_ih is None:
-                weights = self.concat((
+                weights = ops.concat((
                     w_ih.view(-1, 1, 1),
                     w_hh.view(-1, 1, 1)
                 ))
                 has_bias = False
             else:
                 has_bias = True
-                weights = self.concat((
+                weights = ops.concat((
                     w_ih.view(-1, 1, 1),
                     w_hh.view(-1, 1, 1),
                     b_ih.view(-1, 1, 1),
@@ -185,14 +153,14 @@ class _DynamicGRU_CPU_GPU(nn.Cell):
 class _DynamicGRU_Ascend(nn.Cell):
     def __init__(self):
         super().__init__()
-        self.gru = P.DynamicGRUV2(gate_order='rzh')
-        self.transpose = P.Transpose()
+        self.gru = ops.DynamicGRUV2(gate_order='rzh')
         self.dtype = mstype.float16
+        self.transpose = ops.Transpose()
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
         if b_ih is None:
-            b_ih = P.Zeros()(w_ih.shape[0], w_ih.dtype)
-            b_hh = P.Zeros()(w_ih.shape[0], w_ih.dtype)
+            b_ih = ops.zeros(w_ih.shape[0], w_ih.dtype)
+            b_hh = ops.zeros(w_ih.shape[0], w_ih.dtype)
         outputs, _, _, _, _, _ = self.gru(self.cast(x, self.dtype), \
                                          self.cast(self.transpose(w_ih, (1, 0)), self.dtype), \
                                          self.cast(self.transpose(w_hh, (1, 0)), self.dtype), \
@@ -210,7 +178,6 @@ class _DynamicGRU_Ascend(nn.Cell):
 class _DynamicLSTM_CPU_GPU(nn.Cell):
     def __init__(self):
         super().__init__()
-        self.concat = P.Concat()
         self.is_gpu = context.get_context("device_target") == "GPU"
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
@@ -220,7 +187,7 @@ class _DynamicLSTM_CPU_GPU(nn.Cell):
             output, (h_n, c_n) = _DynamicLSTM()(x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh)
         else:
             if b_ih is None:
-                weights = self.concat((
+                weights = ops.concat((
                     w_ih.view(-1, 1, 1),
                     w_hh.view(-1, 1, 1)
                 ))
@@ -228,7 +195,7 @@ class _DynamicLSTM_CPU_GPU(nn.Cell):
             else:
                 has_bias = True
                 if self.is_gpu:
-                    weights = self.concat((
+                    weights = ops.concat((
                         w_ih.view(-1, 1, 1),
                         w_hh.view(-1, 1, 1),
                         b_ih.view(-1, 1, 1),
@@ -241,7 +208,7 @@ class _DynamicLSTM_CPU_GPU(nn.Cell):
                         w_hh.view(-1, 1, 1),
                         bias.view(-1, 1, 1)
                     ))
-            output, h_n, c_n, _, _ = P.LSTM(input_size, hidden_size, 1, has_bias, False, 0.0)(
+            output, h_n, c_n, _, _ = ops.LSTM(input_size, hidden_size, 1, has_bias, False, 0.0)(
                 x,
                 h_0[0].view(1, *h_0[0].shape),
                 h_0[1].view(1, *h_0[1].shape),
@@ -252,26 +219,24 @@ class _DynamicLSTM_CPU_GPU(nn.Cell):
 class _DynamicLSTM_Ascend(nn.Cell):
     def __init__(self):
         super().__init__()
-        self.lstm = P.DynamicRNN()
-        self.concat_dim1 = P.Concat(axis=1)
-        self.concat_dim0 = P.Concat(axis=0)
-        self.transpose = P.Transpose()
-        self.cast = P.Cast()
+        self.lstm = ops.DynamicRNN()
+        self.transpose = ops.Transpose()
+        self.cast = ops.Cast()
         self.split = P.Split(axis=0, output_num=4)
         self.dtype = mstype.float16
 
     def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
         w_ih_i, w_ih_f, w_ih_g, w_ih_o = self.split(w_ih)
         w_hh_i, w_hh_f, w_hh_g, w_hh_o = self.split(w_hh)
-        w_ih = self.concat_dim0((w_ih_i, w_ih_g, w_ih_f, w_ih_o))
-        w_hh = self.concat_dim0((w_hh_i, w_hh_g, w_hh_f, w_hh_o))
-        weight = self.concat_dim1((w_ih, w_hh))
+        w_ih = ops.concat((w_ih_i, w_ih_g, w_ih_f, w_ih_o))
+        w_hh = ops.concat((w_hh_i, w_hh_g, w_hh_f, w_hh_o))
+        weight = ops.concat((w_ih, w_hh), 1)
         if b_ih is None:
-            bias = P.Zeros()(w_ih.shape[0], w_ih.dtype)
+            bias = ops.zeros(w_ih.shape[0], w_ih.dtype)
         else:
             b_ih_i, b_ih_f, b_ih_g, b_ih_o = self.split(b_ih)
             b_hh_i, b_hh_f, b_hh_g, b_hh_o = self.split(b_hh)
-            bias = self.concat_dim0((b_ih_i + b_hh_i, \
+            bias = ops.concat((b_ih_i + b_hh_i, \
                                      b_ih_g + b_hh_g, \
                                      b_ih_f + b_hh_f, \
                                      b_ih_o + b_hh_o))
@@ -322,8 +287,8 @@ class _RNNBase(nn.Cell):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        self.reverse = P.ReverseV2([0])
-        self.reverse_sequence = P.ReverseSequence(0, 1)
+        self.reverse = ops.ReverseV2([0])
+        self.reverse_sequence = ops.ReverseSequence(0, 1)
         self.hidden_size = hidden_size
         self.batch_first = batch_first
         self.num_layers = num_layers
@@ -368,6 +333,7 @@ class _RNNBase(nn.Cell):
         h_n = ()
         c_n = ()
         output = 0
+        # i = Tensor(0, mstype.int32)
         for i in range(self.num_layers):
             offset = i * 2
             if self.has_bias:
@@ -397,20 +363,21 @@ class _RNNBase(nn.Cell):
                 output_b = self.reverse(output_b)
             else:
                 output_b = self.reverse_sequence(output_b, seq_length)
-            output = P.Concat(2)((output_f, output_b))
+            output = ops.concat((output_f, output_b), 2)
             pre_layer = self.dropout_op(output) if (self.dropout != 0 and i < self.num_layers - 1) else output
             if self.is_lstm:
                 h_n += (h_t_f[0], h_t_b[0],)
                 c_n += (h_t_f[1], h_t_b[1],)
             else:
                 h_n += (h_t_f, h_t_b,)
+            
         if self.is_lstm:
-            h_n = P.Concat(0)(h_n)
-            c_n = P.Concat(0)(c_n)
+            h_n = ops.concat(h_n)
+            c_n = ops.concat(c_n)
             h_n = h_n.view(h[0].shape)
             c_n = c_n.view(h[1].shape)
             return output, (h_n.view(h[0].shape), c_n.view(h[1].shape))
-        h_n = P.Concat(0)(h_n)
+        h_n = ops.concat(h_n)
         return output, h_n.view(h.shape)
 
     def _stacked_dynamic_rnn(self, x, h, seq_length):
@@ -437,47 +404,30 @@ class _RNNBase(nn.Cell):
             else:
                 h_n += (h_t,)
         if self.is_lstm:
-            h_n = P.Concat(0)(h_n)
-            c_n = P.Concat(0)(c_n)
+            h_n = ops.concat(h_n)
+            c_n = ops.concat(c_n)
             h_n = h_n.view(h[0].shape)
             c_n = c_n.view(h[1].shape)
             return output, (h_n.view(h[0].shape), c_n.view(h[1].shape))
-        h_n = P.Concat(0)(h_n)
+        h_n = ops.concat(h_n)
         return output, h_n.view(h.shape)
 
     def construct(self, x, hx=None, seq_length=None):
         '''Defines the RNN like operators performed'''
         max_batch_size = x.shape[0] if self.batch_first else x.shape[1]
         num_directions = 2 if self.bidirectional else 1
-        _check_is_tensor("x", x, self.cls_name)
         x_dtype = x.dtype
-        if hx is not None:
-            if not self.is_lstm:
-                _check_is_tensor("h", hx, self.cls_name)
-                args = {'x': x_dtype, 'hx': hx.dtype}
-                _check_input_dtype_same_and_valid(['x', 'hx'], [x_dtype, hx.dtype], \
-                                                  [mstype.float32, mstype.float16], self.cls_name)
-            else:
-                _check_is_tuple('hx', hx, self.cls_name)
-                _check_tuple_length('hx', hx, 2, self.cls_name)
-                _check_is_tensor('hx[0]', hx[0], self.cls_name)
-                _check_is_tensor('hx[1]', hx[1], self.cls_name)
-                _check_input_dtype_same_and_valid(['x', 'hx[0]', 'hx[1]'], [x_dtype, hx[0].dtype, hx[1].dtype], \
-                                                 [mstype.float32, mstype.float16], self.cls_name)
-        else:
+        if hx is None:
             hx = _init_state((self.num_layers * num_directions, max_batch_size, self.hidden_size), \
                              x_dtype, self.is_lstm)
-        if seq_length is not None:
-            _check_input_dtype(seq_length.dtype, "seq_length", [mstype.int32, mstype.int64], self.cls_name)
-            _check_seq_length_size(max_batch_size, seq_length.shape[0], self.cls_name)
         if self.batch_first:
-            x = P.Transpose()(x, (1, 0, 2))
+            x = x.transpose((1, 0, 2))
         if self.bidirectional:
             x_n, hx_n = self._stacked_bi_dynamic_rnn(x, hx, seq_length)
         else:
             x_n, hx_n = self._stacked_dynamic_rnn(x, hx, seq_length)
         if self.batch_first:
-            x_n = P.Transpose()(x_n, (1, 0, 2))
+            x_n = x_n.transpose((1, 0, 2))
         if not self.is_lstm:
             return x_n.astype(x_dtype), hx_n.astype(x_dtype)
         return x_n.astype(x_dtype), (hx_n[0].astype(x_dtype), hx_n[1].astype(x_dtype))

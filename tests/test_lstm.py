@@ -6,9 +6,11 @@ from mindspore import Tensor, ParameterTuple
 from rnns import LSTM
 import torch
 
+mindspore.set_context(mode=mindspore.PYNATIVE_MODE)
+
 class TestLSTM(unittest.TestCase):
     def setUp(self):
-        self.input_size, self.hidden_size = 16, 32
+        self.input_size, self.hidden_size = 32, 64
         self.x = np.random.randn(3, 10, self.input_size)
 
     def test_lstm(self):
@@ -34,10 +36,22 @@ class TestLSTM(unittest.TestCase):
         self.x = np.random.randn(3, 10000, self.input_size)
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
+        import time
+        s = time.time()
         output, h = rnn(inputs)
+        t = time.time() - s
+        print("mindspore:", t)
+
+        rnn_pt = torch.nn.LSTM(self.input_size, self.hidden_size, batch_first=True)
+        inputs = torch.tensor(self.x).to(torch.float32)
+        s = time.time()
+        output, h = rnn_pt(inputs)
+        t = time.time() - s
+        print("pytorch:", t)
 
         assert output.shape == (3, 10000, self.hidden_size)
         assert h[0].shape == (1, 3, self.hidden_size)
+
 
     def test_lstm_fp16(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
@@ -111,11 +125,11 @@ class TestLSTM(unittest.TestCase):
         # forward
         outputs_ms, (h_ms, c_ms) = rnn_ms(inputs_ms)
         outputs_pt, (h_pt, c_pt) = rnn_pt(inputs_pt)
-        print(h_ms.shape, h_pt.shape)
+        # print(h_ms.shape, h_pt.shape)
+        # # print(h_ms, h_pt)
+        # print(outputs_ms, outputs_pt)
         # print(h_ms, h_pt)
-        print(outputs_ms, outputs_pt)
-        print(h_ms, h_pt)
-        print(c_ms, c_pt)
+        # print(c_ms, c_pt)
         assert np.allclose(outputs_ms.asnumpy(), outputs_pt.detach().numpy(), 1e-3, 1e-3)
         assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-3, 1e-3)
         assert np.allclose(c_ms.asnumpy(), c_pt.detach().numpy(), 1e-3, 1e-3)
@@ -141,8 +155,16 @@ class TestLSTM(unittest.TestCase):
 
         # forward
         outputs_ms, (h_ms, c_ms) = rnn_ms(inputs_ms)
+        import time
+        ms_s = time.time()
+        outputs_ms, (h_ms, c_ms) = rnn_ms(inputs_ms)
+        ms_t = time.time() - ms_s
+        pt_s = time.time()
         outputs_pt, (h_pt, c_pt) = rnn_pt(inputs_pt)
+        pt_t = time.time() - pt_s
 
+        print("mindspore:", ms_t)
+        print("pytorch:", pt_t)
         assert np.allclose(outputs_ms.asnumpy(), outputs_pt.detach().numpy(), 1e-3, 1e-3)
         assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-3, 1e-3)
         assert np.allclose(c_ms.asnumpy(), c_pt.detach().numpy(), 1e-3, 1e-3)
