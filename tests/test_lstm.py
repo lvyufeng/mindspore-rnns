@@ -6,51 +6,57 @@ from mindspore import Tensor, ParameterTuple
 from rnns import LSTM
 import torch
 
-mindspore.set_context(mode=mindspore.PYNATIVE_MODE)
+# mindspore.set_context(mode=mindspore.PYNATIVE_MODE)
+# mindspore.set_context(enable_graph_kernel=True)
+# mindspore.set_context(max_call_depth=10000)
 
 class TestLSTM(unittest.TestCase):
     def setUp(self):
-        self.input_size, self.hidden_size = 32, 64
-        self.x = np.random.randn(3, 10, self.input_size)
+        self.batch_size = 16
+        self.seq_length = 10
+        self.input_size, self.hidden_size = 128, 64
+        self.x = np.random.randn(self.batch_size, self.seq_length, self.input_size)
 
     def test_lstm(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
         output, (h, c) = rnn(inputs)
 
-        assert output.shape == (3, 10, self.hidden_size)
-        assert h.shape == (1, 3, self.hidden_size)
-        assert c.shape == (1, 3, self.hidden_size)
+        assert output.shape == (self.batch_size, self.seq_length, self.hidden_size)
+        assert h.shape == (1, self.batch_size, self.hidden_size)
+        assert c.shape == (1, self.batch_size, self.hidden_size)
 
     def test_lstm_seq_length(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
-        seq_length = Tensor([7, 8, 9], mindspore.int64)
+        seq_length = Tensor(np.random.randint(1, self.seq_length, (self.batch_size,)), mindspore.int64)
         output, (h, c) = rnn(inputs, seq_length=seq_length)
 
-        assert output.shape == (3, 10, self.hidden_size)
-        assert h.shape == (1, 3, self.hidden_size)
-        assert c.shape == (1, 3, self.hidden_size)
+        assert output.shape == (self.batch_size, self.seq_length, self.hidden_size)
+        assert h.shape == (1, self.batch_size, self.hidden_size)
+        assert c.shape == (1, self.batch_size, self.hidden_size)
 
     def test_lstm_long(self):
-        self.x = np.random.randn(3, 10000, self.input_size)
+        self.x = np.random.randn(16, 200, self.input_size)
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
         import time
+        output, h = rnn(inputs)
         s = time.time()
         output, h = rnn(inputs)
         t = time.time() - s
-        print("mindspore:", t)
+        print(t)
 
         rnn_pt = torch.nn.LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = torch.tensor(self.x).to(torch.float32)
+        output, h = rnn_pt(inputs)
         s = time.time()
         output, h = rnn_pt(inputs)
         t = time.time() - s
-        print("pytorch:", t)
+        print(t)
 
-        assert output.shape == (3, 10000, self.hidden_size)
-        assert h[0].shape == (1, 3, self.hidden_size)
+        assert output.shape == (16, 200, self.hidden_size)
+        assert h[0].shape == (1, 16, self.hidden_size)
 
 
     def test_lstm_fp16(self):
@@ -58,50 +64,50 @@ class TestLSTM(unittest.TestCase):
         inputs = Tensor(self.x, mindspore.float16)
         output, (h, c) = rnn(inputs)
 
-        assert output.shape == (3, 10, self.hidden_size)
-        assert h.shape == (1, 3, self.hidden_size)
-        assert c.shape == (1, 3, self.hidden_size)
+        assert output.shape == (self.batch_size, self.seq_length, self.hidden_size)
+        assert h.shape == (1, self.batch_size, self.hidden_size)
+        assert c.shape == (1, self.batch_size, self.hidden_size)
         assert output.dtype == mindspore.float16
 
     def test_lstm_with_hx(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
-        h0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float32)
-        c0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float32)
+        h0 = Tensor(np.zeros((1, self.batch_size, self.hidden_size)), mindspore.float32)
+        c0 = Tensor(np.zeros((1, self.batch_size, self.hidden_size)), mindspore.float32)
         output, (h, c) = rnn(inputs, (h0, c0))
 
-        assert output.shape == (3, 10, self.hidden_size)
-        assert h.shape == (1, 3, self.hidden_size)
-        assert c.shape == (1, 3, self.hidden_size)
+        assert output.shape == (self.batch_size, self.seq_length, self.hidden_size)
+        assert h.shape == (1, self.batch_size, self.hidden_size)
+        assert c.shape == (1, self.batch_size, self.hidden_size)
 
     def test_lstm_with_hx_fp16(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float16)
-        h0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float16)
-        c0 = Tensor(np.zeros((1, 3, self.hidden_size)), mindspore.float16)
+        h0 = Tensor(np.zeros((1, self.batch_size, self.hidden_size)), mindspore.float16)
+        c0 = Tensor(np.zeros((1, self.batch_size, self.hidden_size)), mindspore.float16)
         output, (h, c) = rnn(inputs, (h0, c0))
 
-        assert output.shape == (3, 10, self.hidden_size)
-        assert h.shape == (1, 3, self.hidden_size)
-        assert c.shape == (1, 3, self.hidden_size)
+        assert output.shape == (self.batch_size, self.seq_length, self.hidden_size)
+        assert h.shape == (1, self.batch_size, self.hidden_size)
+        assert c.shape == (1, self.batch_size, self.hidden_size)
 
     def test_lstm_bidirection(self):
         rnn = LSTM(self.input_size, self.hidden_size, batch_first=True, bidirectional=True)
         inputs = Tensor(self.x, mindspore.float32)
         output, (h, c) = rnn(inputs)
 
-        assert output.shape == (3, 10, self.hidden_size * 2)
-        assert h.shape == (2, 3, self.hidden_size)
-        assert c.shape == (2, 3, self.hidden_size)
+        assert output.shape == (self.batch_size, self.seq_length, self.hidden_size * 2)
+        assert h.shape == (2, self.batch_size, self.hidden_size)
+        assert c.shape == (2, self.batch_size, self.hidden_size)
 
     def test_lstm_multi_layer(self):
         rnn = LSTM(self.input_size, self.hidden_size, num_layers=3, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
         output, (h, c) = rnn(inputs)
 
-        assert output.shape == (3, 10, self.hidden_size)
-        assert h.shape == (1 * 3, 3, self.hidden_size)
-        assert c.shape == (1 * 3, 3, self.hidden_size)
+        assert output.shape == (self.batch_size, self.seq_length, self.hidden_size)
+        assert h.shape == (1 * 3, self.batch_size, self.hidden_size)
+        assert c.shape == (1 * 3, self.batch_size, self.hidden_size)
 
     def test_forward_cmp(self):
         # mindspore rnn
@@ -159,6 +165,7 @@ class TestLSTM(unittest.TestCase):
         ms_s = time.time()
         outputs_ms, (h_ms, c_ms) = rnn_ms(inputs_ms)
         ms_t = time.time() - ms_s
+        outputs_pt, (h_pt, c_pt) = rnn_pt(inputs_pt)
         pt_s = time.time()
         outputs_pt, (h_pt, c_pt) = rnn_pt(inputs_pt)
         pt_t = time.time() - pt_s

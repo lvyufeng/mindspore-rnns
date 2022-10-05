@@ -5,6 +5,8 @@ from mindspore import Tensor, ParameterTuple
 import mindspore.ops as ops
 from rnns import RNN
 import torch
+import time
+# mindspore.set_context(mode=mindspore.PYNATIVE_MODE)
 
 class TestRNN(unittest.TestCase):
     def setUp(self):
@@ -33,7 +35,10 @@ class TestRNN(unittest.TestCase):
         rnn = RNN(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
         output, h = rnn(inputs)
-
+        s = time.time()
+        output, h = rnn(inputs)
+        t = time.time()
+        print(t - s)
         assert output.shape == (3, 10000, self.hidden_size)
         assert h.shape == (1, 3, self.hidden_size)
 

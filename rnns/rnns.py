@@ -8,8 +8,10 @@ from mindspore import Tensor, Parameter, ParameterTuple
 from mindspore import log as logger
 from mindspore import context
 from mindspore._checkparam import Validator as validator
-from mindspore.ops.operations._rl_inner_ops import CudnnGRU
+from mindspore.ops.operations._rl_inner_ops import CudnnGRU, GRUV2
 from .rnn_cells import rnn_relu_cell, rnn_tanh_cell, gru_cell, lstm_cell
+from mindspore import ms_function
+from mindspore.ops._primitive_cache import _get_cache_prim
 
 @constexpr
 def _init_state(shape, dtype, is_lstm):
@@ -77,6 +79,7 @@ class _DynamicRNN(nn.Cell):
         return self._construct(x, h, seq_length, w_ih.astype(x_dtype), w_hh.astype(x_dtype), \
                                        b_ih.astype(x_dtype), b_hh.astype(x_dtype))
 
+
 class _DynamicLSTM(nn.Cell):
     def __init__(self):
         super().__init__()
@@ -113,155 +116,12 @@ class _DynamicLSTM(nn.Cell):
         return self._construct(x, h, seq_length, w_ih.astype(x_dtype), w_hh.astype(x_dtype), \
                                        b_ih.astype(x_dtype), b_hh.astype(x_dtype))
 
-class _DynamicGRU_CPU_GPU(nn.Cell):
-    def __init__(self):
-        super().__init__()
-        self.is_gpu = context.get_context("device_target") == "GPU"
-
-    def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        gate_size, input_size = w_ih.shape
-        hidden_size = gate_size // 3
-        if self.is_gpu:
-            if b_ih is None:
-                weights = ops.concat((
-                    w_ih.view(-1, 1, 1),
-                    w_hh.view(-1, 1, 1)
-                ))
-                has_bias = False
-            else:
-                has_bias = True
-                weights = ops.concat((
-                    w_ih.view(-1, 1, 1),
-                    w_hh.view(-1, 1, 1),
-                    b_ih.view(-1, 1, 1),
-                    b_hh.view(-1, 1, 1)
-                ))
-            output, h_n, _, _ = CudnnGRU(input_size, hidden_size, 1, has_bias, False, 0.0)(
-                x,
-                h_0.view(1, *h_0.shape),
-                weights.astype(x.dtype)
-            )
-            if seq_length is not None:
-                h_n = get_hidden(output, seq_length)
-                mask = sequence_mask(seq_length, x.shape[0])
-                output = select_by_mask(output, mask)
-        else:
-            output, h_n = _DynamicRNN('GRU')(x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh)
-
-        return output, h_n
-
-class _DynamicGRU_Ascend(nn.Cell):
-    def __init__(self):
-        super().__init__()
-        self.gru = ops.DynamicGRUV2(gate_order='rzh')
-        self.dtype = mstype.float16
-        self.transpose = ops.Transpose()
-
-    def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        if b_ih is None:
-            b_ih = ops.zeros(w_ih.shape[0], w_ih.dtype)
-            b_hh = ops.zeros(w_ih.shape[0], w_ih.dtype)
-        outputs, _, _, _, _, _ = self.gru(self.cast(x, self.dtype), \
-                                         self.cast(self.transpose(w_ih, (1, 0)), self.dtype), \
-                                         self.cast(self.transpose(w_hh, (1, 0)), self.dtype), \
-                                         self.cast(b_ih, self.dtype), \
-                                         self.cast(b_hh, self.dtype), \
-                                         None, self.cast(h_0, self.dtype))
-        if seq_length is not None:
-            h = get_hidden(outputs, seq_length)
-            mask = sequence_mask(seq_length, x.shape[0])
-            outputs = select_by_mask(outputs, mask)
-        else:
-            h = outputs[-1]
-        return outputs, h
-
-class _DynamicLSTM_CPU_GPU(nn.Cell):
-    def __init__(self):
-        super().__init__()
-        self.is_gpu = context.get_context("device_target") == "GPU"
-
-    def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        gate_size, input_size = w_ih.shape
-        hidden_size = gate_size // 4
-        if seq_length is not None:
-            output, (h_n, c_n) = _DynamicLSTM()(x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh)
-        else:
-            if b_ih is None:
-                weights = ops.concat((
-                    w_ih.view(-1, 1, 1),
-                    w_hh.view(-1, 1, 1)
-                ))
-                has_bias = False
-            else:
-                has_bias = True
-                if self.is_gpu:
-                    weights = ops.concat((
-                        w_ih.view(-1, 1, 1),
-                        w_hh.view(-1, 1, 1),
-                        b_ih.view(-1, 1, 1),
-                        b_hh.view(-1, 1, 1)
-                    ))
-                else:
-                    bias = b_ih + b_hh
-                    weights = self.concat((
-                        w_ih.view(-1, 1, 1),
-                        w_hh.view(-1, 1, 1),
-                        bias.view(-1, 1, 1)
-                    ))
-            output, h_n, c_n, _, _ = ops.LSTM(input_size, hidden_size, 1, has_bias, False, 0.0)(
-                x,
-                h_0[0].view(1, *h_0[0].shape),
-                h_0[1].view(1, *h_0[1].shape),
-                weights.astype(x.dtype)
-            )
-        return output, (h_n, c_n)
-
-class _DynamicLSTM_Ascend(nn.Cell):
-    def __init__(self):
-        super().__init__()
-        self.lstm = ops.DynamicRNN()
-        self.transpose = ops.Transpose()
-        self.cast = ops.Cast()
-        self.split = P.Split(axis=0, output_num=4)
-        self.dtype = mstype.float16
-
-    def construct(self, x, h_0, seq_length, w_ih, w_hh, b_ih, b_hh):
-        w_ih_i, w_ih_f, w_ih_g, w_ih_o = self.split(w_ih)
-        w_hh_i, w_hh_f, w_hh_g, w_hh_o = self.split(w_hh)
-        w_ih = ops.concat((w_ih_i, w_ih_g, w_ih_f, w_ih_o))
-        w_hh = ops.concat((w_hh_i, w_hh_g, w_hh_f, w_hh_o))
-        weight = ops.concat((w_ih, w_hh), 1)
-        if b_ih is None:
-            bias = ops.zeros(w_ih.shape[0], w_ih.dtype)
-        else:
-            b_ih_i, b_ih_f, b_ih_g, b_ih_o = self.split(b_ih)
-            b_hh_i, b_hh_f, b_hh_g, b_hh_o = self.split(b_hh)
-            bias = ops.concat((b_ih_i + b_hh_i, \
-                                     b_ih_g + b_hh_g, \
-                                     b_ih_f + b_hh_f, \
-                                     b_ih_o + b_hh_o))
-
-        outputs, h, c, _, _, _, _, _ = self.lstm(self.cast(x, self.dtype), \
-                                                 self.cast(self.transpose(weight, (1, 0)), self.dtype), \
-                                                 self.cast(bias, self.dtype), None, \
-                                                 self.cast(h_0[0].view(1, *h_0[0].shape), self.dtype), \
-                                                 self.cast(h_0[1].view(1, *h_0[1].shape), self.dtype))
-        if seq_length is not None:
-            h = get_hidden(h, seq_length)
-            c = get_hidden(c, seq_length)
-            mask = sequence_mask(seq_length, x.shape[0])
-            outputs = select_by_mask(outputs, mask)
-        else:
-            h = h[-1]
-            c = c[-1]
-        return outputs, (h, c)
 
 class _RNNBase(nn.Cell):
     '''Basic class for RNN operators'''
     def __init__(self, mode, input_size, hidden_size, num_layers=1, has_bias=True,
                  batch_first=False, dropout=0, bidirectional=False):
         super().__init__()
-        is_ascend = context.get_context("device_target") == "Ascend"
         if not 0 <= dropout <= 1:
             raise ValueError("dropout should be a number in range [0, 1] "
                              "representing the probability of an element being "
@@ -274,10 +134,10 @@ class _RNNBase(nn.Cell):
                            "num_layers={}".format(dropout, num_layers))
         if mode == "LSTM":
             gate_size = 4 * hidden_size
-            self.rnn = _DynamicLSTM_Ascend() if is_ascend else _DynamicLSTM_CPU_GPU()
+            self.rnn = _DynamicLSTM()
         elif mode == "GRU":
             gate_size = 3 * hidden_size
-            self.rnn = _DynamicGRU_Ascend() if is_ascend else _DynamicGRU_CPU_GPU()
+            self.rnn = _DynamicRNN('GRU')
         elif mode == "RNN_TANH":
             gate_size = hidden_size
             self.rnn = _DynamicRNN('TANH')
@@ -386,6 +246,7 @@ class _RNNBase(nn.Cell):
         h_n = ()
         c_n = ()
         output = 0
+
         for i in range(self.num_layers):
             if self.has_bias:
                 w_ih, w_hh, b_ih, b_hh = self.w_ih_list[i], self.w_hh_list[i], self.b_ih_list[i], self.b_hh_list[i]
@@ -412,6 +273,7 @@ class _RNNBase(nn.Cell):
         h_n = ops.concat(h_n)
         return output, h_n.view(h.shape)
 
+    # @ms_function
     def construct(self, x, hx=None, seq_length=None):
         '''Defines the RNN like operators performed'''
         max_batch_size = x.shape[0] if self.batch_first else x.shape[1]

@@ -22,19 +22,32 @@ class TestGRU(unittest.TestCase):
     def test_gru_seq_length(self):
         rnn = GRU(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
-        seq_length = Tensor([7, 8, 9], mindspore.int64)
+        seq_length = Tensor([7, 8, 9], mindspore.int32)
         output, h = rnn(inputs, seq_length=seq_length)
 
         assert output.shape == (3, 10, self.hidden_size)
         assert h.shape == (1, 3, self.hidden_size)
 
     def test_gru_long(self):
-        self.x = np.random.randn(3, 10000, self.input_size)
+        self.x = np.random.randn(3, 1000, self.input_size)
         rnn = GRU(self.input_size, self.hidden_size, batch_first=True)
         inputs = Tensor(self.x, mindspore.float32)
+        import time
         output, h = rnn(inputs)
+        s = time.time()
+        output, h = rnn(inputs)
+        t = time.time() - s
+        print(t)
 
-        assert output.shape == (3, 10000, self.hidden_size)
+        rnn_pt = torch.nn.GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs = torch.tensor(self.x).to(torch.float32)
+        output, h = rnn_pt(inputs)
+        s = time.time()
+        output, h = rnn_pt(inputs)
+        t = time.time() - s
+        print(t)
+
+        assert output.shape == (3, 1000, self.hidden_size)
         assert h.shape == (1, 3, self.hidden_size)
 
     def test_gru_fp16(self):
@@ -88,6 +101,38 @@ class TestGRU(unittest.TestCase):
         assert np.allclose(outputs_ms.asnumpy(), outputs_pt.detach().numpy(), 1e-3, 1e-3)
         assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-3, 1e-3)
 
+    def test_forward_cmp_seq_len(self):
+        # mindspore rnn
+        rnn_ms = GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs_ms = Tensor(self.x, mindspore.float32)
+        seq_len_ms = Tensor([7, 8, 9], mindspore.int32)
+
+        # pytorch rnn
+        rnn_pt = torch.nn.GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs_pt = torch.Tensor(self.x)
+        seq_len_pt = torch.Tensor([7, 8, 9])
+
+
+        # set mindspore parameters to pytorch
+        for param in rnn_ms.w_ih_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))
+        for param in rnn_ms.w_hh_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))        
+        for param in rnn_ms.b_ih_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))
+        for param in rnn_ms.b_hh_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))        
+
+        # forward
+        outputs_ms, h_ms = rnn_ms(inputs_ms, seq_length=seq_len_ms)
+
+        out = torch.nn.utils.rnn.pack_padded_sequence(inputs_pt, seq_len_pt, True, enforce_sorted=False)
+        outputs_pt, h_pt = rnn_pt(out)
+        seq_unpacked, _ = torch.nn.utils.rnn.pad_packed_sequence(outputs_pt, True, total_length=10)
+
+        assert np.allclose(outputs_ms.asnumpy(), seq_unpacked.detach().numpy(), 1e-3, 1e-3)
+        assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-3, 1e-3)
+
     def test_backward_cmp(self):
         # mindspore rnn
         rnn_ms = GRU(self.input_size, self.hidden_size, batch_first=True)
@@ -123,4 +168,49 @@ class TestGRU(unittest.TestCase):
         rnn_pt_grads = [param.grad for param in rnn_pt.parameters()]
         
         for ms_grad, pt_grad in zip(rnn_ms_grads, rnn_pt_grads):
+            assert np.mean(ms_grad.asnumpy() - pt_grad.detach().numpy()) < 1e-3
+
+
+    def test_backward_cmp_seq_len(self):
+        # mindspore rnn
+        rnn_ms = GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs_ms = Tensor(self.x, mindspore.float32)
+        seq_len_ms = Tensor([7, 8, 9], mindspore.int32)
+
+        # pytorch rnn
+        rnn_pt = torch.nn.GRU(self.input_size, self.hidden_size, batch_first=True)
+        inputs_pt = torch.Tensor(self.x)
+        seq_len_pt = torch.Tensor([7, 8, 9])
+
+
+        # set mindspore parameters to pytorch
+        for param in rnn_ms.w_ih_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))
+        for param in rnn_ms.w_hh_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))        
+        for param in rnn_ms.b_ih_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))
+        for param in rnn_ms.b_hh_list:
+            setattr(rnn_pt, param.name, torch.nn.Parameter(torch.Tensor(param.asnumpy())))        
+
+        # forward
+        outputs_ms, h_ms = rnn_ms(inputs_ms, seq_length=seq_len_ms)
+
+        out = torch.nn.utils.rnn.pack_padded_sequence(inputs_pt, seq_len_pt, True, enforce_sorted=False)
+        outputs_pt, h_pt = rnn_pt(out)
+        seq_unpacked, _ = torch.nn.utils.rnn.pad_packed_sequence(outputs_pt, True, total_length=10)
+
+        assert np.allclose(outputs_ms.asnumpy(), seq_unpacked.detach().numpy(), 1e-3, 1e-3)
+        assert np.allclose(h_ms.asnumpy(), h_pt.detach().numpy(), 1e-3, 1e-3)
+
+        # backward
+        grad_param = ops.GradOperation(get_by_list=True)
+        rnn_ms_grads = grad_param(rnn_ms, ParameterTuple(rnn_ms.trainable_params()))(inputs_ms, None, seq_len_ms)
+
+        seq_unpacked.backward(torch.ones_like(seq_unpacked), retain_graph=True)
+        h_pt.backward(torch.ones_like(h_pt), retain_graph=True)
+        rnn_pt_grads = [param.grad for param in rnn_pt.parameters()]
+        
+        for ms_grad, pt_grad in zip(rnn_ms_grads, rnn_pt_grads):
+            print(ms_grad.asnumpy() - pt_grad.detach().numpy())
             assert np.mean(ms_grad.asnumpy() - pt_grad.detach().numpy()) < 1e-3
