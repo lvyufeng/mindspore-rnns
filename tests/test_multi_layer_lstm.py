@@ -26,14 +26,14 @@ class TestMultiLayerLSTM(unittest.TestCase):
         input_tensor = Tensor(np.ones([seq_len, batch_size, input_size]).astype(np.float32))
         h0 = Tensor(np.ones([num_layers, batch_size, hidden_size]).astype(np.float32))
         c0 = Tensor(np.ones([num_layers, batch_size, hidden_size]).astype(np.float32))
-        def forward(input_tensor, h0, c0, w_ih, w_hh, b_ih, b_hh):
-            output, hn, cn = net(input_tensor, h0, c0, None, w_ih, w_hh, b_ih, b_hh)
+        def forward(input_tensor, h0, c0, weight_list):
+            output, hn, cn = net(input_tensor, h0, c0, None, weight_list)
             return output, hn, cn
         
         if jit:
             forward = mindspore.jit(forward)
 
-        output, hn, cn = forward(input_tensor, h0, c0, w_ih, w_hh, b_ih, b_hh)
+        output, hn, cn = forward(input_tensor, h0, c0, (w_ih, w_hh, b_ih, b_hh))
         print(input_tensor.shape, output.shape)
         print(h0.shape, hn.shape)
         print(c0.shape, cn.shape)

@@ -46,36 +46,17 @@ class MultiLayerLSTM(nn.Cell):
         else:
             self.cell = MultiLSTMCell(input_size, hidden_size, num_layers, has_bias, dropout)
 
-    def construct(self, x, h_0, c_0, seq_length, w_ih, w_hh, b_ih, b_hh):
+    def construct(self, x, h_0, c_0, seq_length, weight_list):
         if self.is_ascend:
-            return self._construct_ascend(x, h_0, c_0, seq_length, w_ih, w_hh, b_ih, b_hh)
+            return self._construct_ascend(x, h_0, c_0, seq_length, weight_list)
         else:
-            return self._construct_gpu_cpu(x, h_0, c_0, seq_length, w_ih, w_hh, b_ih, b_hh)
+            return self._construct_gpu_cpu(x, h_0, c_0, seq_length, weight_list)
 
-    def _construct_gpu_cpu(self, x, h_0, c_0, seq_length, w_ih, w_hh, b_ih, b_hh):
+    def _construct_gpu_cpu(self, x, h_0, c_0, seq_length, weight_list):
         # inputs: (seq_length, batch_size, input_size)
         # h_0: (num_directions * num_layers, batch_size, hidden_size)
         # c_0: (num_directions * num_layers, batch_size, hidden_size)
-        if b_ih is None:
-            weights = ops.concat((
-                w_ih.view(-1, 1, 1),
-                w_hh.view(-1, 1, 1)
-            ))
-        else:
-            if self.is_gpu:
-                weights = ops.concat((
-                    w_ih.view(-1, 1, 1),
-                    w_hh.view(-1, 1, 1),
-                    b_ih.view(-1, 1, 1),
-                    b_hh.view(-1, 1, 1)
-                ))
-            else:
-                bias = b_ih + b_hh
-                weights = ops.concat((
-                    w_ih.view(-1, 1, 1),
-                    w_hh.view(-1, 1, 1),
-                    bias.view(-1, 1, 1)
-                ))
+        weights = Tensor._flatten_tensors(weight_list, 0)[0]
         max_seq_length = x.shape[0]
         output_tensor = ops.zeros(x.shape[:-1] + (self.hidden_size,), x.dtype)
         # input_list = ops.tensor_split(x, max_seq_length)
@@ -98,7 +79,8 @@ class MultiLayerLSTM(nn.Cell):
             output_tensor = select_by_mask(output_tensor, mask)
         return output_tensor, h, c
 
-    def _construct_ascend(self, x, h_0, c_0, seq_length, w_ih, w_hh, b_ih, b_hh):
+    def _construct_ascend(self, x, h_0, c_0, seq_length, weight_list):
+        w_ih, w_hh, b_ih, b_hh = weight_list
         w_ih_i, w_ih_f, w_ih_g, w_ih_o = ops.split(w_ih, 4)
         w_hh_i, w_hh_f, w_hh_g, w_hh_o = ops.split(w_hh, 4)
         w_ih = ops.concat((w_ih_i, w_ih_g, w_ih_f, w_ih_o))
