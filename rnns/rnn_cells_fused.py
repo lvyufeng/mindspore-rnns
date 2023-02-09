@@ -32,6 +32,7 @@ class MultiLSTMCell(nn.Cell):
         # inputs: (1, batch_size, input_size)
         # h_0: (num_directions * num_layers, batch_size, hidden_size)
         # c_0: (num_directions * num_layers, batch_size, hidden_size)
+        print(input.shape, hidden.shape, cell.shape, weight.shape)
         output, hidden_next, cell_next, _, _ = self.cell(input, hidden, cell, weight)
         return output, hidden_next, cell_next
 
@@ -44,7 +45,8 @@ class MultiLayerLSTM(nn.Cell):
         if self.is_ascend:
             self.cell = ops.DynamicRNN(cell_depth=num_layers, keep_prob=1-dropout)
         else:
-            self.cell = MultiLSTMCell(input_size, hidden_size, num_layers, has_bias, dropout)
+            # self.cell = MultiLSTMCell(input_size, hidden_size, num_layers, has_bias, dropout)
+            self.cell = ops.LSTM(input_size, hidden_size, num_layers, has_bias, False, dropout)
 
     def construct(self, x, h_0, c_0, seq_length, weight_list):
         if self.is_ascend:
@@ -56,27 +58,33 @@ class MultiLayerLSTM(nn.Cell):
         # inputs: (seq_length, batch_size, input_size)
         # h_0: (num_directions * num_layers, batch_size, hidden_size)
         # c_0: (num_directions * num_layers, batch_size, hidden_size)
-        weights = Tensor._flatten_tensors(weight_list, 0)[0]
+        # weights = Tensor._flatten_tensors(weight_list, 0)[0]
+        weights = weight_list
+        print(weights.shape)
         max_seq_length = x.shape[0]
         output_tensor = ops.zeros(x.shape[:-1] + (self.hidden_size,), x.dtype)
         # input_list = ops.tensor_split(x, max_seq_length)
-        t = Tensor(0, mindspore.int32)
+        # t = Tensor(0, mindspore.int32)
+        t = 0
         h = h_0
         c = c_0
         while t < max_seq_length:
-            output, h_t, c_t = self.cell(x[t:t + 1:1], h, c, weights)
-            if seq_length is not None:
-                h = ops.select(seq_length, h_t, h)
-                c = ops.select(seq_length, c_t, c)
-            else:
-                h = h_t
-                c = c_t
-            output_tensor[t] = output
-            t += 1
-        # outputs = ops.concat(outputs)
-        if seq_length is not None:
-            mask = sequence_mask(seq_length, x.shape[0])
-            output_tensor = select_by_mask(output_tensor, mask)
+            print(x[t:t + 1:1].shape)
+            print(h.shape)
+            print(c.shape)
+            output, h_t, c_t, _, _ = self.cell(x[t:t + 1:1], h, c, weights)
+            # if seq_length is not None:
+            #     h = ops.select(seq_length, h_t, h)
+            #     c = ops.select(seq_length, c_t, c)
+            # else:
+            h = h_t
+            c = c_t
+            # output_tensor[t] = output
+        #     t += 1
+        # # outputs = ops.concat(outputs)
+        # if seq_length is not None:
+        #     mask = sequence_mask(seq_length, x.shape[0])
+        #     output_tensor = select_by_mask(output_tensor, mask)
         return output_tensor, h, c
 
     def _construct_ascend(self, x, h_0, c_0, seq_length, weight_list):
